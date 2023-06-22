@@ -132,17 +132,12 @@ pub trait ServerCertVerifier: Send + Sync {
     /// This method is only called for TLS1.2 handshakes.  Note that, in TLS1.2,
     /// SignatureSchemes such as `SignatureScheme::ECDSA_NISTP256_SHA256` are not
     /// in fact bound to the specific curve implied in their name.
-    ///
-    /// This trait method has a default implementation that uses webpki to verify
-    /// the signature.
     fn verify_tls12_signature(
         &self,
         message: &[u8],
         cert: &Certificate,
         dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, Error> {
-        verify_signed_struct(message, cert, dss)
-    }
+    ) -> Result<HandshakeSignatureValid, Error>;
 
     /// Verify a signature allegedly by the given server certificate.
     ///
@@ -158,28 +153,18 @@ pub trait ServerCertVerifier: Send + Sync {
     /// If and only if the signature is valid, return `Ok(HandshakeSignatureValid)`.
     /// Otherwise, return an error -- rustls will send an alert and abort the
     /// connection.
-    ///
-    /// This trait method has a default implementation that uses webpki to verify
-    /// the signature.
     fn verify_tls13_signature(
         &self,
         message: &[u8],
         cert: &Certificate,
         dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, Error> {
-        verify_tls13(message, cert, dss)
-    }
+    ) -> Result<HandshakeSignatureValid, Error>;
 
     /// Return the list of SignatureSchemes that this verifier will handle,
     /// in `verify_tls12_signature` and `verify_tls13_signature` calls.
     ///
     /// This should be in priority order, with the most preferred first.
-    ///
-    /// This trait method has a default implementation that reflects the schemes
-    /// supported by webpki.
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        WebPkiVerifier::verification_schemes()
-    }
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme>;
 }
 
 impl fmt::Debug for dyn ServerCertVerifier {
@@ -255,17 +240,12 @@ pub trait ClientCertVerifier: Send + Sync {
     /// This method is only called for TLS1.2 handshakes.  Note that, in TLS1.2,
     /// SignatureSchemes such as `SignatureScheme::ECDSA_NISTP256_SHA256` are not
     /// in fact bound to the specific curve implied in their name.
-    ///
-    /// This trait method has a default implementation that uses webpki to verify
-    /// the signature.
     fn verify_tls12_signature(
         &self,
         message: &[u8],
         cert: &Certificate,
         dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, Error> {
-        verify_signed_struct(message, cert, dss)
-    }
+    ) -> Result<HandshakeSignatureValid, Error>;
 
     /// Verify a signature allegedly by the given client certificate.
     ///
@@ -276,28 +256,18 @@ pub trait ClientCertVerifier: Send + Sync {
     /// `SignatureScheme::ECDSA_NISTP256_SHA256`
     /// must only validate signatures using public keys on the right curve --
     /// rustls does not enforce this requirement for you.
-    ///
-    /// This trait method has a default implementation that uses webpki to verify
-    /// the signature.
     fn verify_tls13_signature(
         &self,
         message: &[u8],
         cert: &Certificate,
         dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, Error> {
-        verify_tls13(message, cert, dss)
-    }
+    ) -> Result<HandshakeSignatureValid, Error>;
 
     /// Return the list of SignatureSchemes that this verifier will handle,
     /// in `verify_tls12_signature` and `verify_tls13_signature` calls.
     ///
     /// This should be in priority order, with the most preferred first.
-    ///
-    /// This trait method has a default implementation that reflects the schemes
-    /// supported by webpki.
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        WebPkiVerifier::verification_schemes()
-    }
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme>;
 }
 
 impl fmt::Debug for dyn ClientCertVerifier {
@@ -357,6 +327,28 @@ impl ServerCertVerifier for WebPkiVerifier {
             }
         }
     }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &Certificate,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        Self::default_verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &Certificate,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        Self::default_verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        Self::default_supported_verify_schemes()
+    }
 }
 
 /// Default `ServerCertVerifier`, see the trait impl for more information.
@@ -375,9 +367,8 @@ impl WebPkiVerifier {
         Self { roots }
     }
 
-    /// Returns the signature verification methods supported by
-    /// webpki.
-    pub fn verification_schemes() -> Vec<SignatureScheme> {
+    /// Which signature verification schemes the `webpki` crate supports.
+    pub fn default_supported_verify_schemes() -> Vec<SignatureScheme> {
         vec![
             SignatureScheme::ECDSA_NISTP384_SHA384,
             SignatureScheme::ECDSA_NISTP256_SHA256,
@@ -389,6 +380,26 @@ impl WebPkiVerifier {
             SignatureScheme::RSA_PKCS1_SHA384,
             SignatureScheme::RSA_PKCS1_SHA256,
         ]
+    }
+
+    /// An full implementation of `ServerCertVerifier::verify_tls12_signature` or
+    /// `ClientCertVerifier::verify_tls12_signature`.
+    pub fn default_verify_tls12_signature(
+        message: &[u8],
+        cert: &Certificate,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        verify_signed_struct(message, cert, dss)
+    }
+
+    /// An full implementation of `ServerCertVerifier::verify_tls13_signature` or
+    /// `ClientCertVerifier::verify_tls13_signature`.
+    pub fn default_verify_tls13_signature(
+        message: &[u8],
+        cert: &Certificate,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        verify_tls13(message, cert, dss)
     }
 }
 
@@ -477,6 +488,28 @@ impl ClientCertVerifier for AllowAnyAuthenticatedClient {
         .map_err(pki_error)
         .map(|_| ClientCertVerified::assertion())
     }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &Certificate,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        WebPkiVerifier::default_verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &Certificate,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        WebPkiVerifier::default_verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        WebPkiVerifier::default_supported_verify_schemes()
+    }
 }
 
 /// A `ClientCertVerifier` that will allow both anonymous and authenticated
@@ -530,6 +563,28 @@ impl ClientCertVerifier for AllowAnyAnonymousOrAuthenticatedClient {
         self.inner
             .verify_client_cert(end_entity, intermediates, now)
     }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &Certificate,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        WebPkiVerifier::default_verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &Certificate,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        WebPkiVerifier::default_verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        WebPkiVerifier::default_supported_verify_schemes()
+    }
 }
 
 fn pki_error(error: webpki::Error) -> Error {
@@ -577,6 +632,28 @@ impl ClientCertVerifier for NoClientAuth {
         _intermediates: &[Certificate],
         _now: SystemTime,
     ) -> Result<ClientCertVerified, Error> {
+        unimplemented!();
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &Certificate,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        unimplemented!();
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &Certificate,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        unimplemented!();
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         unimplemented!();
     }
 }
