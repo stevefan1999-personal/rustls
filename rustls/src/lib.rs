@@ -401,7 +401,6 @@ pub use crate::versions::{SupportedProtocolVersion, ALL_VERSIONS, DEFAULT_VERSIO
 
 /// Items for use in a client.
 pub mod client {
-    pub(super) mod builder;
     mod client_conn;
     mod common;
     pub(super) mod handy;
@@ -410,8 +409,8 @@ pub mod client {
     mod tls12;
     mod tls13;
 
+    pub use crate::crypto::ring::client::builder::WantsClientCert;
     pub use crate::dns_name::InvalidDnsNameError;
-    pub use builder::WantsClientCert;
     pub use client_conn::{
         ClientConfig, ClientConnection, ClientConnectionData, ClientSessionStore,
         ResolvesClientCert, Resumption, ServerName, Tls12Resumption, WriteEarlyData,
@@ -433,7 +432,6 @@ pub use client::{ClientConfig, ClientConnection, ServerName};
 
 /// Items for use in a server.
 pub mod server {
-    pub(crate) mod builder;
     mod common;
     pub(crate) mod handy;
     mod hs;
@@ -442,11 +440,11 @@ pub mod server {
     mod tls12;
     mod tls13;
 
+    pub use crate::crypto::ring::server::builder::WantsServerCert;
     pub use crate::crypto::ring::verify::{
         AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient,
     };
     pub use crate::verify::NoClientAuth;
-    pub use builder::WantsServerCert;
     pub use handy::ResolvesServerCertUsingSni;
     pub use handy::{NoServerSessionStorage, ServerSessionMemoryCache};
     pub use server_conn::StoresServerSessions;
