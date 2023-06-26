@@ -66,7 +66,7 @@ impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsServerCert<C>> {
         cert_chain: Vec<key::Certificate>,
         key_der: key::PrivateKey,
     ) -> Result<ServerConfig<C>, Error> {
-        let resolver = handy::AlwaysResolvesChain::new(cert_chain, &key_der)?;
+        let resolver = super::handy::AlwaysResolvesChain::new(cert_chain, &key_der)?;
         Ok(self.with_cert_resolver(Arc::new(resolver)))
     }
 
@@ -85,7 +85,8 @@ impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsServerCert<C>> {
         key_der: key::PrivateKey,
         ocsp: Vec<u8>,
     ) -> Result<ServerConfig<C>, Error> {
-        let resolver = handy::AlwaysResolvesChain::new_with_extras(cert_chain, &key_der, ocsp)?;
+        let resolver =
+            super::handy::AlwaysResolvesChain::new_with_extras(cert_chain, &key_der, ocsp)?;
         Ok(self.with_cert_resolver(Arc::new(resolver)))
     }
 
