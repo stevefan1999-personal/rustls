@@ -27,12 +27,14 @@ impl crypto::hmac::Hmac for Hmac {
 struct Key(ring::hmac::Key);
 
 impl crypto::hmac::Key for Key {
-    fn one_shot(&self, data: &[u8]) -> crypto::hmac::Tag {
-        ring::hmac::sign(&self.0, data).into()
-    }
-
-    fn start(&self) -> Box<dyn crypto::hmac::Incremental> {
-        Box::new(Incremental(ring::hmac::Context::with_key(&self.0)))
+    fn sign_concat(&self, first: &[u8], middle: &[&[u8]], last: &[u8]) -> crypto::hmac::Tag {
+        let mut ctx = ring::hmac::Context::with_key(&self.0);
+        ctx.update(first);
+        for d in middle {
+            ctx.update(d);
+        }
+        ctx.update(last);
+        ctx.sign().into()
     }
 
     fn tag_len(&self) -> usize {
@@ -40,18 +42,5 @@ impl crypto::hmac::Key for Key {
             .algorithm()
             .digest_algorithm()
             .output_len
-    }
-}
-
-struct Incremental(ring::hmac::Context);
-
-impl crypto::hmac::Incremental for Incremental {
-    fn update(mut self: Box<Self>, data: &[u8]) -> Box<dyn crypto::hmac::Incremental> {
-        self.0.update(data);
-        self
-    }
-
-    fn finish(self: Box<Self>) -> crypto::hmac::Tag {
-        self.0.sign().into()
     }
 }

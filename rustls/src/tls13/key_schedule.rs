@@ -651,7 +651,7 @@ impl KeySchedule {
         self.suite
             .hmac_provider
             .open_key(hmac_key.as_ref())
-            .one_shot(hs_hash.as_ref())
+            .sign(&[hs_hash.as_ref()])
     }
 
     /// Derive the next application traffic secret, returning it.

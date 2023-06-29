@@ -26,7 +26,7 @@ impl Extractor {
     pub(crate) fn extract(self, ikm: &[u8]) -> Expander {
         Expander(
             self.hmac
-                .open_key(self.salt.one_shot(ikm).as_ref()),
+                .open_key(self.salt.sign(&[ikm]).as_ref()),
         )
     }
 }
@@ -59,23 +59,15 @@ impl Expander {
     }
 
     fn expand_unchecked(&self, info: &[&[u8]], output: &mut [u8]) {
-        fn t_n(expander: &Expander, t_previous: &[u8], info: &[&[u8]], n: u8) -> hmac::Tag {
-            let mut context = expander.0.start().update(t_previous);
-
-            for i in info {
-                context = context.update(i);
-            }
-
-            context.update(&[n]).finish()
-        }
-
         let mut term = hmac::Tag::new(b"");
 
         for (n, chunk) in output
             .chunks_mut(self.0.tag_len())
             .enumerate()
         {
-            term = t_n(self, term.as_ref(), info, (n + 1) as u8);
+            term = self
+                .0
+                .sign_concat(term.as_ref(), info, &[(n + 1) as u8]);
             chunk.copy_from_slice(&term.as_ref()[..chunk.len()]);
         }
     }
@@ -271,7 +263,7 @@ mod benchmarks {
         ];
 
         b.iter(|| {
-            test::black_box(expander.expand_one_block(info));
+            expander.expand_one_block(info);
         });
     }
 }

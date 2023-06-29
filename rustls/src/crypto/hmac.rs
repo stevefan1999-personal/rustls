@@ -35,21 +35,15 @@ impl AsRef<[u8]> for Tag {
 }
 
 pub(crate) trait Key: Send + Sync {
-    /// Calculates a tag over `data`.
-    fn one_shot(&self, data: &[u8]) -> Tag;
+    /// Calculates a tag over `data` -- an slice of byte slices.
+    fn sign(&self, data: &[&[u8]]) -> Tag {
+        self.sign_concat(&[], data, &[])
+    }
 
-    /// Starts a new incremental HMAC computation.
-    fn start(&self) -> Box<dyn Incremental>;
+    /// Calculates a tag over the concatenation of `first`, the items in `middle`, and `last`.
+    fn sign_concat(&self, first: &[u8], middle: &[&[u8]], last: &[u8]) -> Tag;
 
     /// Returns the length of the tag returned by a computation using
     /// this key.
     fn tag_len(&self) -> usize;
-}
-
-pub(crate) trait Incremental {
-    /// Add `data` to computation.
-    fn update(self: Box<Self>, data: &[u8]) -> Box<dyn Incremental>;
-
-    /// Finish the computation, returning the resulting tag.
-    fn finish(self: Box<Self>) -> Tag;
 }
