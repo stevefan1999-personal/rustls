@@ -69,3 +69,25 @@ mod tests {
         assert_eq!(expect.to_vec(), output.to_vec());
     }
 }
+
+#[cfg(bench)]
+mod benchmarks {
+    #[allow(unused_extern_crates)]
+    extern crate test;
+
+    #[bench]
+    fn bench_sha256(b: &mut test::Bencher) {
+        use crate::crypto::hmac::Hmac;
+        use crate::crypto::ring;
+
+        let label = &b"extended master secret"[..];
+        let seed = [0u8; 32];
+        let key = ring::hmac::HMAC_SHA256.open_key(b"secret");
+
+        b.iter(|| {
+            let mut out = [0u8; 48];
+            super::prf(&mut out, key.as_ref(), &label, &seed);
+            test::black_box(out);
+        });
+    }
+}

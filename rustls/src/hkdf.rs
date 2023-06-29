@@ -247,3 +247,31 @@ mod test {
             .is_err());
     }
 }
+
+#[cfg(bench)]
+mod benchmarks {
+    #[allow(unused_extern_crates)]
+    extern crate test;
+
+    #[bench]
+    fn bench_expand_sha256(b: &mut test::Bencher) {
+        use crate::crypto::ring;
+
+        let expander = super::Extractor::no_salt(&ring::hmac::HMAC_SHA256).extract(b"secret");
+        let info: &[&[u8]] = &[
+            &[0, 32],
+            &[18],
+            &[116, 108, 115, 49, 51, 32],
+            &[99, 32, 104, 115, 32, 116, 114, 97, 102, 102, 105, 99],
+            &[32],
+            &[
+                144, 153, 255, 235, 153, 229, 254, 53, 218, 250, 176, 129, 36, 18, 187, 193, 30,
+                247, 232, 183, 229, 94, 226, 253, 198, 181, 166, 142, 180, 208, 6, 178,
+            ],
+        ];
+
+        b.iter(|| {
+            test::black_box(expander.expand_one_block(info));
+        });
+    }
+}
