@@ -1,3 +1,5 @@
+#![allow(clippy::duplicate_mod)]
+
 use crate::crypto::cipher::{
     make_tls13_aad, AeadKey, Iv, MessageDecrypter, MessageEncrypter, Nonce, Tls13AeadAlgorithm,
 };

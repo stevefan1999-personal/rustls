@@ -1,3 +1,5 @@
+#![allow(clippy::duplicate_mod)]
+
 use super::lib;
 use crate::crypto;
 use crate::msgs::enums::HashAlgorithm;

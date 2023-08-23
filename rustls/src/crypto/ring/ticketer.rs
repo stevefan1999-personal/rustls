@@ -1,3 +1,5 @@
+#![allow(clippy::duplicate_mod)]
+
 use super::lib::{aead, rand, rand::SecureRandom};
 use crate::error::Error;
 use crate::rand::GetRandomFailed;

@@ -1,3 +1,5 @@
+#![allow(clippy::duplicate_mod)]
+
 use crate::enums::{SignatureAlgorithm, SignatureScheme};
 use crate::error::Error;
 use crate::key;

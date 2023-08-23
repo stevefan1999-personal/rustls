@@ -1,3 +1,5 @@
+#![allow(clippy::duplicate_mod)]
+
 use super::lib::agreement::{
     self, agree_ephemeral, EphemeralPrivateKey, PublicKey, UnparsedPublicKey,
 };

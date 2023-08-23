@@ -274,6 +274,14 @@
 //!
 //! - `webpki`: this makes the rustls crate depend on the rustls-webpki crate, which
 //!   is used for certificate verification.
+//!
+//! - `aws_lc_rs`: this makes the rustls crate depend on the aws-lc-rs crate,
+//!   which can be used for cryptography as an alternative to *ring*.
+//!   Use `rustls::aws_lc_rs::AwsLcRs` as a `CryptoProvider` when making a
+//!   `ClientConfig` or `ServerConfig` to use aws-lc-rs.
+//!
+//!   Note that aws-lc-rs has additional build-time dependencies like cmake.
+//!   See [the documentation](https://aws.github.io/aws-lc-rs/requirements/index.html) for details.
 
 // Require docs for public APIs, deny unsafe code, etc.
 #![forbid(unsafe_code, unused_must_use)]
