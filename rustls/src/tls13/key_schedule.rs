@@ -788,9 +788,9 @@ where
 #[cfg(all(test, feature = "ring"))]
 mod test {
     use super::{derive_traffic_iv, derive_traffic_key, KeySchedule, SecretKind};
+    use crate::crypto::ring::lib::aead;
     use crate::crypto::ring::tls13::TLS13_CHACHA20_POLY1305_SHA256_INTERNAL;
     use crate::KeyLog;
-    use ring::aead;
 
     #[test]
     fn test_vectors() {

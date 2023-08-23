@@ -11,7 +11,7 @@ use crate::suites::ConnectionTrafficSecrets;
 use crate::suites::{CipherSuiteCommon, SupportedCipherSuite};
 use crate::tls13::Tls13CipherSuite;
 
-use ring::aead;
+use super::lib::aead;
 
 /// The TLS1.3 ciphersuite TLS_CHACHA20_POLY1305_SHA256
 pub static TLS13_CHACHA20_POLY1305_SHA256: SupportedCipherSuite =
@@ -23,13 +23,13 @@ pub(crate) static TLS13_CHACHA20_POLY1305_SHA256_INTERNAL: &Tls13CipherSuite = &
         hash_provider: &super::hash::SHA256,
     },
     hmac_provider: &super::hmac::HMAC_SHA256,
-    aead_alg: &Chacha20Poly1305Aead(AeadAlgorithm(&ring::aead::CHACHA20_POLY1305)),
+    aead_alg: &Chacha20Poly1305Aead(AeadAlgorithm(&aead::CHACHA20_POLY1305)),
     #[cfg(feature = "quic")]
     confidentiality_limit: u64::MAX,
     #[cfg(feature = "quic")]
     integrity_limit: 1 << 36,
     #[cfg(feature = "quic")]
-    quic: &super::quic::KeyBuilder(&ring::aead::CHACHA20_POLY1305, &ring::aead::quic::CHACHA20),
+    quic: &super::quic::KeyBuilder(&aead::CHACHA20_POLY1305, &aead::quic::CHACHA20),
 };
 
 /// The TLS1.3 ciphersuite TLS_AES_256_GCM_SHA384
@@ -40,13 +40,13 @@ pub static TLS13_AES_256_GCM_SHA384: SupportedCipherSuite =
             hash_provider: &super::hash::SHA384,
         },
         hmac_provider: &super::hmac::HMAC_SHA384,
-        aead_alg: &Aes256GcmAead(AeadAlgorithm(&ring::aead::AES_256_GCM)),
+        aead_alg: &Aes256GcmAead(AeadAlgorithm(&aead::AES_256_GCM)),
         #[cfg(feature = "quic")]
         confidentiality_limit: 1 << 23,
         #[cfg(feature = "quic")]
         integrity_limit: 1 << 52,
         #[cfg(feature = "quic")]
-        quic: &super::quic::KeyBuilder(&ring::aead::AES_256_GCM, &aead::quic::AES_256),
+        quic: &super::quic::KeyBuilder(&aead::AES_256_GCM, &aead::quic::AES_256),
     });
 
 /// The TLS1.3 ciphersuite TLS_AES_128_GCM_SHA256
@@ -59,13 +59,13 @@ pub(crate) static TLS13_AES_128_GCM_SHA256_INTERNAL: &Tls13CipherSuite = &Tls13C
         hash_provider: &super::hash::SHA256,
     },
     hmac_provider: &super::hmac::HMAC_SHA256,
-    aead_alg: &Aes128GcmAead(AeadAlgorithm(&ring::aead::AES_128_GCM)),
+    aead_alg: &Aes128GcmAead(AeadAlgorithm(&aead::AES_128_GCM)),
     #[cfg(feature = "quic")]
     confidentiality_limit: 1 << 23,
     #[cfg(feature = "quic")]
     integrity_limit: 1 << 52,
     #[cfg(feature = "quic")]
-    quic: &super::quic::KeyBuilder(&ring::aead::AES_128_GCM, &aead::quic::AES_128),
+    quic: &super::quic::KeyBuilder(&aead::AES_128_GCM, &aead::quic::AES_128),
 };
 
 struct Chacha20Poly1305Aead(AeadAlgorithm);
@@ -135,7 +135,7 @@ impl Tls13AeadAlgorithm for Aes128GcmAead {
 }
 
 // common encrypter/decrypter/key_len items for above Tls13AeadAlgorithm impls
-struct AeadAlgorithm(&'static ring::aead::Algorithm);
+struct AeadAlgorithm(&'static aead::Algorithm);
 
 impl AeadAlgorithm {
     fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
@@ -160,12 +160,12 @@ impl AeadAlgorithm {
 }
 
 struct Tls13MessageEncrypter {
-    enc_key: ring::aead::LessSafeKey,
+    enc_key: aead::LessSafeKey,
     iv: Iv,
 }
 
 struct Tls13MessageDecrypter {
-    dec_key: ring::aead::LessSafeKey,
+    dec_key: aead::LessSafeKey,
     iv: Iv,
 }
 

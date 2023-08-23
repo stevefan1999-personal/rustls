@@ -5,9 +5,11 @@ use crate::rand::GetRandomFailed;
 use crate::server::ProducesTickets;
 use crate::suites::SupportedCipherSuite;
 
-use ring::aead;
-use ring::agreement::{agree_ephemeral, EphemeralPrivateKey, UnparsedPublicKey};
-use ring::rand::{SecureRandom, SystemRandom};
+pub use ring as lib;
+
+use lib::aead;
+use lib::agreement::{agree_ephemeral, EphemeralPrivateKey, UnparsedPublicKey};
+use lib::rand::{SecureRandom, SystemRandom};
 
 use alloc::sync::Arc;
 use core::fmt;
@@ -74,7 +76,7 @@ pub static ALL_CIPHER_SUITES: &[SupportedCipherSuite] = &[
 pub struct KeyExchange {
     group: &'static SupportedKxGroup,
     priv_key: EphemeralPrivateKey,
-    pub_key: ring::agreement::PublicKey,
+    pub_key: lib::agreement::PublicKey,
 }
 
 impl super::KeyExchange for KeyExchange {
@@ -145,7 +147,7 @@ pub struct SupportedKxGroup {
     pub name: NamedGroup,
 
     /// The corresponding ring agreement::Algorithm
-    agreement_algorithm: &'static ring::agreement::Algorithm,
+    agreement_algorithm: &'static lib::agreement::Algorithm,
 }
 
 impl SupportedGroup for SupportedKxGroup {
@@ -163,19 +165,19 @@ impl fmt::Debug for SupportedKxGroup {
 /// Ephemeral ECDH on curve25519 (see RFC7748)
 pub static X25519: SupportedKxGroup = SupportedKxGroup {
     name: NamedGroup::X25519,
-    agreement_algorithm: &ring::agreement::X25519,
+    agreement_algorithm: &lib::agreement::X25519,
 };
 
 /// Ephemeral ECDH on secp256r1 (aka NIST-P256)
 pub static SECP256R1: SupportedKxGroup = SupportedKxGroup {
     name: NamedGroup::secp256r1,
-    agreement_algorithm: &ring::agreement::ECDH_P256,
+    agreement_algorithm: &lib::agreement::ECDH_P256,
 };
 
 /// Ephemeral ECDH on secp384r1 (aka NIST-P384)
 pub static SECP384R1: SupportedKxGroup = SupportedKxGroup {
     name: NamedGroup::secp384r1,
-    agreement_algorithm: &ring::agreement::ECDH_P384,
+    agreement_algorithm: &lib::agreement::ECDH_P384,
 };
 
 /// A list of all the key exchange groups supported by rustls.
@@ -244,7 +246,7 @@ impl ProducesTickets for AeadTicketer {
         let mut nonce_buf = [0u8; 12];
         Ring::fill_random(&mut nonce_buf).ok()?;
         let nonce = aead::Nonce::assume_unique_for_key(nonce_buf);
-        let aad = ring::aead::Aad::empty();
+        let aad = aead::Aad::empty();
 
         let mut ciphertext =
             Vec::with_capacity(nonce_buf.len() + message.len() + self.key.algorithm().tag_len());

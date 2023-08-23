@@ -4,8 +4,8 @@ use crate::key;
 use crate::sign::{Signer, SigningKey};
 use crate::x509::{wrap_in_asn1_len, wrap_in_sequence};
 
-use ring::io::der;
-use ring::signature::{self, EcdsaKeyPair, Ed25519KeyPair, RsaKeyPair};
+use super::lib::io::der;
+use super::lib::signature::{self, EcdsaKeyPair, Ed25519KeyPair, RsaKeyPair};
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -130,7 +130,7 @@ impl Signer for RsaSigner {
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>, Error> {
         let mut sig = vec![0; self.key.public_modulus_len()];
 
-        let rng = ring::rand::SystemRandom::new();
+        let rng = super::lib::rand::SystemRandom::new();
         self.key
             .sign(self.encoding, &rng, message, &mut sig)
             .map(|_| sig)
@@ -249,7 +249,7 @@ struct EcdsaSigner {
 
 impl Signer for EcdsaSigner {
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>, Error> {
-        let rng = ring::rand::SystemRandom::new();
+        let rng = super::lib::rand::SystemRandom::new();
         self.key
             .sign(&rng, message)
             .map_err(|_| Error::General("signing failed".into()))

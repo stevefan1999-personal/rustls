@@ -13,7 +13,7 @@ use crate::suites::ConnectionTrafficSecrets;
 use crate::suites::{CipherSuiteCommon, SupportedCipherSuite};
 use crate::tls12::Tls12CipherSuite;
 
-use ring::aead;
+use super::lib::aead;
 
 /// The TLS1.2 ciphersuite TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256.
 pub static TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256: SupportedCipherSuite =
