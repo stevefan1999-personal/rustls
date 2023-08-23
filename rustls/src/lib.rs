@@ -401,18 +401,26 @@ pub mod internal {
     }
 }
 
+// Have a (non-public) "primary provider" mod which supplies
+// parts of the public API outside of `CryptoProvider`.
+// Currently this is *ring*, and should match the crate's
+// default features to minimise surprise.
+#[cfg(all(not(feature = "ring"), feature = "aws_lc_rs"))]
+use crate::crypto::aws_lc_rs as primary_provider;
+#[cfg(feature = "ring")]
+use crate::crypto::ring as primary_provider;
+
 // The public interface is:
 pub use crate::builder::{
     ConfigBuilder, ConfigSide, WantsCipherSuites, WantsKxGroups, WantsVerifier, WantsVersions,
 };
 pub use crate::common_state::{CommonState, IoState, Side};
 pub use crate::conn::{Connection, ConnectionCommon, Reader, SideData, Writer};
-#[cfg(feature = "ring")]
-pub use crate::crypto::ring::Ticketer;
-#[cfg(feature = "ring")]
-pub use crate::crypto::ring::{SupportedKxGroup, ALL_KX_GROUPS};
-#[cfg(feature = "ring")]
-pub use crate::crypto::ring::{ALL_CIPHER_SUITES, DEFAULT_CIPHER_SUITES};
+#[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
+pub use primary_provider::{
+    SupportedKxGroup, Ticketer, ALL_CIPHER_SUITES, ALL_KX_GROUPS, DEFAULT_CIPHER_SUITES,
+};
+
 pub use crate::enums::{
     AlertDescription, CipherSuite, ContentType, HandshakeType, ProtocolVersion, SignatureAlgorithm,
     SignatureScheme,
@@ -512,16 +520,9 @@ pub use server::{ServerConfig, ServerConnection};
 ///
 /// [`ALL_CIPHER_SUITES`] is provided as an array of all of these values.
 pub mod cipher_suite {
-    #[cfg(all(feature = "tls12", feature = "ring"))]
-    pub use crate::crypto::ring::tls12::{
-        TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-        TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-        TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-    };
-    #[cfg(feature = "ring")]
-    pub use crate::crypto::ring::tls13::{
-        TLS13_AES_128_GCM_SHA256, TLS13_AES_256_GCM_SHA384, TLS13_CHACHA20_POLY1305_SHA256,
-    };
+    #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
+    pub use super::primary_provider::cipher_suite::*;
+
     pub use crate::suites::CipherSuiteCommon;
 }
 
@@ -534,14 +535,14 @@ pub mod version {
     pub use crate::versions::TLS13;
 }
 
-#[cfg(feature = "ring")]
+#[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
 /// All defined key exchange groups supported by *ring* appear in this module.
-pub use crypto::ring::kx_group;
+pub use primary_provider::kx_group;
 
 /// Message signing interfaces and implementations.
 pub mod sign {
-    #[cfg(feature = "ring")]
-    pub use crate::crypto::ring::sign::{
+    #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
+    pub use super::primary_provider::sign::{
         any_ecdsa_type, any_eddsa_type, any_supported_type, RsaSigningKey,
     };
     pub use crate::crypto::signer::{CertifiedKey, Signer, SigningKey};

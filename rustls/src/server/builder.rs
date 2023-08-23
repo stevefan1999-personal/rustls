@@ -7,7 +7,7 @@ use crate::verify;
 use crate::verify::ClientCertVerifier;
 use crate::versions;
 use crate::NoKeyLog;
-#[cfg(feature = "ring")]
+#[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
 use crate::{error::Error, key};
 
 use alloc::sync::Arc;
@@ -49,7 +49,7 @@ pub struct WantsServerCert<C: CryptoProvider> {
 }
 
 impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsServerCert<C>> {
-    #[cfg(feature = "ring")]
+    #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
     /// Sets a single certificate chain and matching private key.  This
     /// certificate and key is used for all subsequent connections,
     /// irrespective of things like SNI hostname.
@@ -72,7 +72,7 @@ impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsServerCert<C>> {
         Ok(self.with_cert_resolver(Arc::new(resolver)))
     }
 
-    #[cfg(feature = "ring")]
+    #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
     /// Sets a single certificate chain, matching private key, OCSP
     /// response and SCTs.  This certificate and key is used for all
     /// subsequent connections, irrespective of things like SNI hostname.

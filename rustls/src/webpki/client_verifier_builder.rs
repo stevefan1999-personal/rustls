@@ -76,7 +76,7 @@ impl ClientCertVerifierBuilder {
             return Err(ClientCertVerifierBuilderError::NoRootAnchors);
         }
 
-        #[cfg(feature = "ring")]
+        #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
         if self.supported_algs.is_none() {
             self.supported_algs = Some(super::verify::SUPPORTED_SIG_ALGS);
         }

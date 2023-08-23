@@ -142,7 +142,7 @@ impl WebPkiServerVerifier {
     /// Constructs a new `WebPkiServerVerifier`.
     ///
     /// `roots` is the set of trust anchors to trust for issuing server certs.
-    #[cfg(feature = "ring")]
+    #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
     pub fn new(roots: impl Into<Arc<RootCertStore>>) -> Self {
         Self::new_with_algorithms(roots, SUPPORTED_SIG_ALGS)
     }
@@ -164,7 +164,7 @@ impl WebPkiServerVerifier {
 
     /// A full implementation of `ServerCertVerifier::verify_tls12_signature` or
     /// `ClientCertVerifier::verify_tls12_signature`.
-    #[cfg(feature = "ring")]
+    #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
     pub fn default_verify_tls12_signature(
         message: &[u8],
         cert: &Certificate,
@@ -175,7 +175,7 @@ impl WebPkiServerVerifier {
 
     /// A full implementation of `ServerCertVerifier::verify_tls13_signature` or
     /// `ClientCertVerifier::verify_tls13_signature`.
-    #[cfg(feature = "ring")]
+    #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
     pub fn default_verify_tls13_signature(
         message: &[u8],
         cert: &Certificate,
@@ -186,7 +186,7 @@ impl WebPkiServerVerifier {
 
     /// A full implementation of `ServerCertVerifier::supported_verify_schemes()` or
     /// `ClientCertVerifier::supported_verify_schemes()`.
-    #[cfg(feature = "ring")]
+    #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
     pub fn default_supported_verify_schemes() -> Vec<SignatureScheme> {
         SUPPORTED_SIG_ALGS.supported_schemes()
     }
@@ -506,7 +506,7 @@ impl fmt::Debug for WebPkiSupportedAlgorithms {
     }
 }
 
-#[cfg(feature = "ring")]
+#[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
 #[test]
 fn test_webpkisupportedalgorithms_is_debug() {
     assert_eq!(
@@ -540,7 +540,7 @@ impl WebPkiSupportedAlgorithms {
 
 /// A `WebPkiSupportedAlgorithms` value that reflects webpki's capabilities when
 /// compiled against *ring*.
-#[cfg(feature = "ring")]
+#[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
 pub(crate) static SUPPORTED_SIG_ALGS: WebPkiSupportedAlgorithms = WebPkiSupportedAlgorithms {
     all: &[
         webpki::ECDSA_P256_SHA256,
