@@ -316,13 +316,13 @@ pub(crate) const DOWNGRADE_SENTINEL: [u8; 8] = [0x44, 0x4f, 0x57, 0x4e, 0x47, 0x
 mod tests {
     use super::*;
     use crate::common_state::{CommonState, Side};
-    use crate::crypto::ring::{self, X25519};
+    use crate::crypto::ring::{self, kx_group::X25519};
     use crate::crypto::KeyExchange;
     use crate::msgs::handshake::{ClientECDHParams, ServerECDHParams};
 
     #[test]
     fn server_ecdhe_remaining_bytes() {
-        let key = ring::KeyExchange::start(crate::NamedGroup::X25519, &[&X25519]).unwrap();
+        let key = ring::kx::KeyExchange::start(crate::NamedGroup::X25519, &[&X25519]).unwrap();
         let server_params = ServerECDHParams::new(key.group(), key.pub_key());
         let mut server_buf = Vec::new();
         server_params.encode(&mut server_buf);
