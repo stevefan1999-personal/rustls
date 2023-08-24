@@ -12,6 +12,10 @@ byteorder = "1.4.3"
 clap = { version = "4.3.21", features = ["derive"] }
 itertools = "0.11.0"
 rayon = "1.7.0"
-rustls = { path = "../rustls" }
+rustls = { path = "../rustls", default-features = false, features = ["tls12", "webpki"] }
 rustls-pemfile = "1.0.3"
 
+[features]
+default = ["ring"]
+ring = ["rustls/ring"]
+aws_lc_rs = ["rustls/aws_lc_rs"]
