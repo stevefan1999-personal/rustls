@@ -51,6 +51,11 @@ jobs:
         env:
           RUST_BACKTRACE: 1
 
+      - name: cargo test (debug; aws-lc-rs)
+        run: cargo test --no-default-features --features aws_lc_rs,tls12,webpki,dangerous_configuration,quic,read_buf,logging,secret_extraction
+        env:
+          RUST_BACKTRACE: 1
+
       - name: cargo build (debug; rustls-provider-example)
         run: cargo build -p rustls-provider-example
 
@@ -95,6 +100,9 @@ jobs:
       - name: cargo test (debug; no default features; tls12)
         run: cargo test --no-default-features --features tls12
 
+      - name: cargo test (debug; no default features; aws-lc-rs,webpki,tls12)
+        run: cargo test --no-default-features --features aws_lc_rs,webpki,tls12
+
       - name: cargo test (release; no run)
         run: cargo test --release --no-run
 
@@ -116,9 +124,17 @@ jobs:
           go-version: "1.20"
           cache: false
 
-      - name: Run test suite
+      - name: Run test suite (ring)
         working-directory: bogo
         run: ./runme
+        env:
+          BOGO_SHIM_PROVIDER: ring
+
+      - name: Run test suite (aws-lc-rs)
+        working-directory: bogo
+        run: ./runme
+        env:
+          BOGO_SHIM_PROVIDER: aws-lc-rs
 
 
   fuzz:
@@ -291,6 +307,7 @@ jobs:
       - run: cargo clippy --package rustls --no-default-features --all-targets -- --deny warnings
       - run: cargo clippy --manifest-path=connect-tests/Cargo.toml --all-features --all-targets -- --deny warnings
       - run: cargo clippy --manifest-path=fuzz/Cargo.toml --all-features --all-targets -- --deny warnings
+      - run: cargo clippy --manifest-path=provider-example/Cargo.toml --all-features --all-targets -- --deny warnings
 
   clippy-nightly:
     name: Clippy (Nightly)
@@ -308,3 +325,4 @@ jobs:
       - run: cargo clippy --package rustls --no-default-features --all-targets -- --deny warnings
       - run: cargo clippy --manifest-path=connect-tests/Cargo.toml --all-features --all-targets -- --deny warnings
       - run: cargo clippy --manifest-path=fuzz/Cargo.toml --all-features --all-targets -- --deny warnings
+      - run: cargo clippy --manifest-path=provider-example/Cargo.toml --all-features --all-targets -- --deny warnings
