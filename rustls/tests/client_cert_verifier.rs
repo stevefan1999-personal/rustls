@@ -3,7 +3,7 @@
 #![cfg(all(
     feature = "dangerous_configuration",
     feature = "webpki",
-    feature = "ring"
+    any(feature = "ring", feature = "aws_lc_rs")
 ))]
 
 mod common;
@@ -11,10 +11,9 @@ mod common;
 use crate::common::{
     do_handshake_until_both_error, do_handshake_until_error, get_client_root_store,
     make_client_config_with_versions, make_client_config_with_versions_with_auth,
-    make_pair_for_arc_configs, server_name, ErrorFromPeer, KeyType, ALL_KEY_TYPES,
+    make_pair_for_arc_configs, server_name, ErrorFromPeer, KeyType, Provider, ALL_KEY_TYPES,
 };
 use rustls::client::{HandshakeSignatureValid, WebPkiServerVerifier};
-use rustls::crypto::ring::Ring;
 use rustls::internal::msgs::handshake::DistinguishedName;
 use rustls::server::{ClientCertVerified, ClientCertVerifier};
 use rustls::{
@@ -41,7 +40,7 @@ fn ver_err() -> Result<ClientCertVerified, Error> {
 fn server_config_with_verifier(
     kt: KeyType,
     client_cert_verifier: MockClientVerifier,
-) -> ServerConfig<Ring> {
+) -> ServerConfig<Provider> {
     ServerConfig::builder()
         .with_safe_defaults()
         .with_client_cert_verifier(Arc::new(client_cert_verifier))

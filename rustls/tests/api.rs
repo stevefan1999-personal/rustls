@@ -1,4 +1,4 @@
-#![cfg(feature = "ring")]
+#![cfg(any(feature = "ring", feature = "aws_lc_rs"))]
 #![cfg_attr(read_buf, feature(read_buf))]
 //! Assorted public API tests.
 use std::cell::RefCell;
@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use rustls::client::{ResolvesClientCert, Resumption};
-use rustls::crypto::ring::Ring;
 use rustls::crypto::CryptoProvider;
 use rustls::internal::msgs::base::Payload;
 use rustls::internal::msgs::codec::Codec;
@@ -220,7 +219,7 @@ fn check_read_buf_err(reader: &mut dyn io::Read, err_kind: io::ErrorKind) {
 #[test]
 fn config_builder_for_client_rejects_empty_kx_groups() {
     assert_eq!(
-        ClientConfig::<Ring>::builder()
+        ClientConfig::<Provider>::builder()
             .with_safe_default_cipher_suites()
             .with_kx_groups(&[])
             .with_safe_default_protocol_versions()
@@ -232,7 +231,7 @@ fn config_builder_for_client_rejects_empty_kx_groups() {
 #[test]
 fn config_builder_for_client_rejects_empty_cipher_suites() {
     assert_eq!(
-        ClientConfig::<Ring>::builder()
+        ClientConfig::<Provider>::builder()
             .with_cipher_suites(&[])
             .with_safe_default_kx_groups()
             .with_safe_default_protocol_versions()
@@ -245,7 +244,7 @@ fn config_builder_for_client_rejects_empty_cipher_suites() {
 #[test]
 fn config_builder_for_client_rejects_incompatible_cipher_suites() {
     assert_eq!(
-        ClientConfig::<Ring>::builder()
+        ClientConfig::<Provider>::builder()
             .with_cipher_suites(&[rustls::cipher_suite::TLS13_AES_256_GCM_SHA384])
             .with_safe_default_kx_groups()
             .with_protocol_versions(&[&rustls::version::TLS12])
@@ -257,7 +256,7 @@ fn config_builder_for_client_rejects_incompatible_cipher_suites() {
 #[test]
 fn config_builder_for_server_rejects_empty_kx_groups() {
     assert_eq!(
-        ServerConfig::<Ring>::builder()
+        ServerConfig::<Provider>::builder()
             .with_safe_default_cipher_suites()
             .with_kx_groups(&[])
             .with_safe_default_protocol_versions()
@@ -269,7 +268,7 @@ fn config_builder_for_server_rejects_empty_kx_groups() {
 #[test]
 fn config_builder_for_server_rejects_empty_cipher_suites() {
     assert_eq!(
-        ServerConfig::<Ring>::builder()
+        ServerConfig::<Provider>::builder()
             .with_cipher_suites(&[])
             .with_safe_default_kx_groups()
             .with_safe_default_protocol_versions()
@@ -282,7 +281,7 @@ fn config_builder_for_server_rejects_empty_cipher_suites() {
 #[test]
 fn config_builder_for_server_rejects_incompatible_cipher_suites() {
     assert_eq!(
-        ServerConfig::<Ring>::builder()
+        ServerConfig::<Provider>::builder()
             .with_cipher_suites(&[rustls::cipher_suite::TLS13_AES_256_GCM_SHA384])
             .with_safe_default_kx_groups()
             .with_protocol_versions(&[&rustls::version::TLS12])
@@ -443,8 +442,9 @@ fn server_can_get_client_cert_after_resumption() {
 }
 
 #[test]
+#[cfg(feature = "ring")]
 fn test_config_builders_debug() {
-    let b = ServerConfig::<Ring>::builder();
+    let b = ServerConfig::<Provider>::builder();
     assert_eq!(
         "ConfigBuilder<ServerConfig<Ring>, _> { state: WantsCipherSuites(()) }",
         format!("{:?}", b)
@@ -459,7 +459,7 @@ fn test_config_builders_debug() {
     let b = b.with_no_client_auth();
     assert_eq!("ConfigBuilder<ServerConfig<Ring>, _> { state: WantsServerCert { cipher_suites: [TLS13_CHACHA20_POLY1305_SHA256], kx_groups: [X25519], versions: [TLSv1_3], verifier: dyn ClientCertVerifier } }", format!("{:?}", b));
 
-    let b = ClientConfig::<Ring>::builder();
+    let b = ClientConfig::<Provider>::builder();
     assert_eq!(
         "ConfigBuilder<ClientConfig<Ring>, _> { state: WantsCipherSuites(()) }",
         format!("{:?}", b)
@@ -488,7 +488,7 @@ fn server_allow_any_anonymous_or_authenticated_client() {
             .build()
             .unwrap();
 
-        let server_config = ServerConfig::<Ring>::builder()
+        let server_config = ServerConfig::<Provider>::builder()
             .with_safe_defaults()
             .with_client_cert_verifier(client_auth)
             .with_single_cert(kt.get_chain(), kt.get_key())
@@ -896,7 +896,7 @@ fn check_sigalgs_reduced_by_ciphersuite(
 ) {
     let client_config = finish_client_config(
         kt,
-        ClientConfig::<Ring>::builder()
+        ClientConfig::<Provider>::builder()
             .with_cipher_suites(&[find_suite(suite)])
             .with_safe_default_kx_groups()
             .with_safe_default_protocol_versions()
@@ -1010,8 +1010,8 @@ fn client_checks_server_certificate_with_given_name() {
 #[test]
 fn client_checks_server_certificate_with_given_ip_address() {
     fn check_server_name(
-        client_config: Arc<ClientConfig<Ring>>,
-        server_config: Arc<ServerConfig<Ring>>,
+        client_config: Arc<ClientConfig<Provider>>,
+        server_config: Arc<ServerConfig<Provider>>,
         name: &'static str,
     ) -> Result<(), ErrorFromPeer> {
         let mut client = ClientConnection::new(client_config, server_name(name)).unwrap();
@@ -1934,7 +1934,7 @@ fn stream_write_swallows_underlying_io_error_after_plaintext_processed() {
     assert_eq!(format!("{:?}", rc), "Ok(5)");
 }
 
-fn make_disjoint_suite_configs() -> (ClientConfig<Ring>, ServerConfig<Ring>) {
+fn make_disjoint_suite_configs() -> (ClientConfig<Provider>, ServerConfig<Provider>) {
     let kt = KeyType::Rsa;
     let server_config = finish_server_config(
         kt,
@@ -2491,7 +2491,7 @@ fn negotiated_ciphersuite_client() {
         let scs = find_suite(suite);
         let client_config = finish_client_config(
             kt,
-            ClientConfig::<Ring>::builder()
+            ClientConfig::<Provider>::builder()
                 .with_cipher_suites(&[scs])
                 .with_safe_default_kx_groups()
                 .with_protocol_versions(&[version])
@@ -2509,7 +2509,7 @@ fn negotiated_ciphersuite_server() {
         let scs = find_suite(suite);
         let server_config = finish_server_config(
             kt,
-            ServerConfig::<Ring>::builder()
+            ServerConfig::<Provider>::builder()
                 .with_cipher_suites(&[scs])
                 .with_safe_default_kx_groups()
                 .with_protocol_versions(&[version])
@@ -3196,7 +3196,7 @@ fn early_data_not_available() {
     assert!(client.early_data().is_none());
 }
 
-fn early_data_configs() -> (Arc<ClientConfig<Ring>>, Arc<ServerConfig<Ring>>) {
+fn early_data_configs() -> (Arc<ClientConfig<Provider>>, Arc<ServerConfig<Provider>>) {
     let kt = KeyType::Rsa;
     let mut client_config = make_client_config(kt);
     client_config.enable_early_data = true;
@@ -3637,6 +3637,7 @@ mod test_quic {
     }
 
     #[test]
+    #[cfg(feature = "ring")] // uses ring APIs directly
     fn test_quic_server_no_params_received() {
         let server_config =
             make_server_config_with_versions(KeyType::Ed25519, &[&rustls::version::TLS13]);
@@ -3672,7 +3673,7 @@ mod test_quic {
             payload: HandshakePayload::ClientHello(ClientHelloPayload {
                 client_version: ProtocolVersion::TLSv1_3,
                 random,
-                session_id: SessionId::random::<Ring>().unwrap(),
+                session_id: SessionId::random::<Provider>().unwrap(),
                 cipher_suites: vec![CipherSuite::TLS13_AES_128_GCM_SHA256],
                 compression_methods: vec![Compression::Null],
                 extensions: vec![
@@ -3698,6 +3699,7 @@ mod test_quic {
     }
 
     #[test]
+    #[cfg(feature = "ring")] // uses ring APIs directly
     fn test_quic_server_no_tls12() {
         let mut server_config =
             make_server_config_with_versions(KeyType::Ed25519, &[&rustls::version::TLS13]);
@@ -3734,7 +3736,7 @@ mod test_quic {
             payload: HandshakePayload::ClientHello(ClientHelloPayload {
                 client_version: ProtocolVersion::TLSv1_2,
                 random,
-                session_id: SessionId::random::<Ring>().unwrap(),
+                session_id: SessionId::random::<Provider>().unwrap(),
                 cipher_suites: vec![CipherSuite::TLS13_AES_128_GCM_SHA256],
                 compression_methods: vec![Compression::Null],
                 extensions: vec![
@@ -4131,7 +4133,7 @@ fn test_client_sends_helloretryrequest() {
 #[test]
 fn test_client_rejects_hrr_with_varied_session_id() {
     use rustls::internal::msgs::handshake::SessionId;
-    let different_session_id = SessionId::random::<Ring>().unwrap();
+    let different_session_id = SessionId::random::<Provider>().unwrap();
 
     let assert_client_sends_hello_with_secp384 = |msg: &mut Message| -> Altered {
         if let MessagePayload::Handshake { parsed, encoded } = &mut msg.payload {
@@ -4553,7 +4555,7 @@ fn test_client_tls12_no_resume_after_server_downgrade() {
 
     let server_config_1 = Arc::new(common::finish_server_config(
         KeyType::Ed25519,
-        ServerConfig::<Ring>::builder()
+        ServerConfig::<Provider>::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
             .with_protocol_versions(&[&rustls::version::TLS13])
@@ -4562,7 +4564,7 @@ fn test_client_tls12_no_resume_after_server_downgrade() {
 
     let mut server_config_2 = common::finish_server_config(
         KeyType::Ed25519,
-        ServerConfig::<Ring>::builder()
+        ServerConfig::<Provider>::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
             .with_protocol_versions(&[&rustls::version::TLS12])
@@ -4801,7 +4803,7 @@ fn test_secret_extraction_enabled() {
         println!("Testing suite {:?}", suite.suite().as_str());
 
         // Only offer the cipher suite (and protocol version) that we're testing
-        let mut server_config = ServerConfig::<Ring>::builder()
+        let mut server_config = ServerConfig::<Provider>::builder()
             .with_cipher_suites(&[suite])
             .with_safe_default_kx_groups()
             .with_protocol_versions(&[version])
@@ -4859,7 +4861,7 @@ fn test_secret_extraction_disabled_or_too_early() {
     let kt = KeyType::Rsa;
 
     for (server_enable, client_enable) in [(true, false), (false, true)] {
-        let mut server_config = ServerConfig::<Ring>::builder()
+        let mut server_config = ServerConfig::<Provider>::builder()
             .with_cipher_suites(&[suite])
             .with_safe_default_kx_groups()
             .with_safe_default_protocol_versions()
@@ -4901,7 +4903,7 @@ fn test_received_plaintext_backpressure() {
     let kt = KeyType::Rsa;
 
     let server_config = Arc::new(
-        ServerConfig::<Ring>::builder()
+        ServerConfig::<Provider>::builder()
             .with_cipher_suites(&[suite])
             .with_safe_default_kx_groups()
             .with_safe_default_protocol_versions()

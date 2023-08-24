@@ -1,11 +1,14 @@
 #![allow(dead_code)]
-#![cfg(feature = "ring")]
+#![cfg(any(feature = "ring", feature = "aws_lc_rs"))]
 
 use std::io;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use rustls::crypto::ring::Ring;
+#[cfg(all(not(feature = "ring"), feature = "aws_lc_rs"))]
+pub use rustls::crypto::aws_lc_rs::AwsLcRs as Provider;
+#[cfg(feature = "ring")]
+pub use rustls::crypto::ring::Ring as Provider;
 use rustls::crypto::CryptoProvider;
 use rustls::internal::msgs::codec::Reader;
 use rustls::internal::msgs::message::{Message, OpaqueMessage, PlainMessage};
@@ -256,14 +259,14 @@ pub fn finish_server_config<C: CryptoProvider>(
         .unwrap()
 }
 
-pub fn make_server_config(kt: KeyType) -> ServerConfig<Ring> {
+pub fn make_server_config(kt: KeyType) -> ServerConfig<Provider> {
     finish_server_config(kt, ServerConfig::builder().with_safe_defaults())
 }
 
 pub fn make_server_config_with_versions(
     kt: KeyType,
     versions: &[&'static rustls::SupportedProtocolVersion],
-) -> ServerConfig<Ring> {
+) -> ServerConfig<Provider> {
     finish_server_config(
         kt,
         ServerConfig::builder()
@@ -277,7 +280,7 @@ pub fn make_server_config_with_versions(
 pub fn make_server_config_with_kx_groups(
     kt: KeyType,
     kx_groups: &[&'static rustls::SupportedKxGroup],
-) -> ServerConfig<Ring> {
+) -> ServerConfig<Provider> {
     finish_server_config(
         kt,
         ServerConfig::builder()
@@ -302,7 +305,7 @@ pub fn get_client_root_store(kt: KeyType) -> Arc<RootCertStore> {
 pub fn make_server_config_with_mandatory_client_auth_crls(
     kt: KeyType,
     crls: Vec<UnparsedCertRevocationList>,
-) -> ServerConfig<Ring> {
+) -> ServerConfig<Provider> {
     let client_auth_roots = get_client_root_store(kt);
 
     let client_auth = WebPkiClientVerifier::builder(client_auth_roots)
@@ -317,14 +320,14 @@ pub fn make_server_config_with_mandatory_client_auth_crls(
         .unwrap()
 }
 
-pub fn make_server_config_with_mandatory_client_auth(kt: KeyType) -> ServerConfig<Ring> {
+pub fn make_server_config_with_mandatory_client_auth(kt: KeyType) -> ServerConfig<Provider> {
     make_server_config_with_mandatory_client_auth_crls(kt, Vec::new())
 }
 
 pub fn make_server_config_with_optional_client_auth(
     kt: KeyType,
     crls: Vec<UnparsedCertRevocationList>,
-) -> ServerConfig<Ring> {
+) -> ServerConfig<Provider> {
     let client_auth_roots = get_client_root_store(kt);
 
     let client_auth = WebPkiClientVerifier::builder(client_auth_roots)
@@ -368,14 +371,14 @@ pub fn finish_client_config_with_creds<C: CryptoProvider>(
         .unwrap()
 }
 
-pub fn make_client_config(kt: KeyType) -> ClientConfig<Ring> {
-    finish_client_config(kt, ClientConfig::<Ring>::builder().with_safe_defaults())
+pub fn make_client_config(kt: KeyType) -> ClientConfig<Provider> {
+    finish_client_config(kt, ClientConfig::<Provider>::builder().with_safe_defaults())
 }
 
 pub fn make_client_config_with_kx_groups(
     kt: KeyType,
     kx_groups: &[&'static rustls::SupportedKxGroup],
-) -> ClientConfig<Ring> {
+) -> ClientConfig<Provider> {
     let builder = ClientConfig::builder()
         .with_safe_default_cipher_suites()
         .with_kx_groups(kx_groups)
@@ -387,7 +390,7 @@ pub fn make_client_config_with_kx_groups(
 pub fn make_client_config_with_versions(
     kt: KeyType,
     versions: &[&'static rustls::SupportedProtocolVersion],
-) -> ClientConfig<Ring> {
+) -> ClientConfig<Provider> {
     let builder = ClientConfig::builder()
         .with_safe_default_cipher_suites()
         .with_safe_default_kx_groups()
@@ -397,13 +400,13 @@ pub fn make_client_config_with_versions(
 }
 
 pub fn make_client_config_with_auth(kt: KeyType) -> ClientConfig<impl CryptoProvider> {
-    finish_client_config_with_creds(kt, ClientConfig::<Ring>::builder().with_safe_defaults())
+    finish_client_config_with_creds(kt, ClientConfig::<Provider>::builder().with_safe_defaults())
 }
 
 pub fn make_client_config_with_versions_with_auth(
     kt: KeyType,
     versions: &[&'static rustls::SupportedProtocolVersion],
-) -> ClientConfig<Ring> {
+) -> ClientConfig<Provider> {
     let builder = ClientConfig::builder()
         .with_safe_default_cipher_suites()
         .with_safe_default_kx_groups()
