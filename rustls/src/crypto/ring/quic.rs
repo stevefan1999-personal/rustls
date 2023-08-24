@@ -229,12 +229,12 @@ impl crate::quic::Algorithm for KeyBuilder {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::common_state::Side;
-    use crate::crypto::ring;
-    use crate::crypto::ring::tls13::{
+    use super::super::hmac::HMAC_SHA256;
+    use super::super::tls13::{
         TLS13_AES_128_GCM_SHA256_INTERNAL, TLS13_CHACHA20_POLY1305_SHA256_INTERNAL,
     };
+    use super::*;
+    use crate::common_state::Side;
     use crate::quic::HeaderProtectionKey;
     use crate::quic::PacketKey;
     use crate::quic::*;
@@ -247,8 +247,7 @@ mod test {
             0x0f, 0x21, 0x63, 0x2b,
         ];
 
-        let expander =
-            hkdf::Expander::from_okm(&hkdf::OkmBlock::from(SECRET), &ring::hmac::HMAC_SHA256);
+        let expander = hkdf::Expander::from_okm(&hkdf::OkmBlock::from(SECRET), &HMAC_SHA256);
         let hpk = super::HeaderProtectionKey::new(&expander, version, &aead::quic::CHACHA20);
         let packet = super::PacketKey::new(
             TLS13_CHACHA20_POLY1305_SHA256_INTERNAL,

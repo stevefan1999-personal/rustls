@@ -123,10 +123,10 @@ impl Expander {
     }
 }
 
-#[cfg(all(test, feature = "ring"))]
+#[cfg(all(test, any(feature = "ring", feature = "aws_lc_rs")))]
 mod test {
     use super::Extractor;
-    use crate::crypto::ring;
+    use crate::primary_provider::hmac::{HMAC_SHA256, HMAC_SHA384};
 
     struct ByteArray<const N: usize>([u8; N]);
 
@@ -140,7 +140,6 @@ mod test {
 
     #[test]
     fn test_case_1() {
-        let hmac = &ring::hmac::HMAC_SHA256;
         let ikm = &[0x0b; 22];
         let salt = &[
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
@@ -150,7 +149,7 @@ mod test {
             &[0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9],
         ];
 
-        let output: ByteArray<42> = Extractor::new(hmac, salt)
+        let output: ByteArray<42> = Extractor::new(&HMAC_SHA256, salt)
             .extract(ikm)
             .expand(info);
 
@@ -166,13 +165,11 @@ mod test {
 
     #[test]
     fn test_case_2() {
-        let hmac = &ring::hmac::HMAC_SHA256;
-
         let ikm: Vec<u8> = (0x00u8..=0x4f).collect();
         let salt: Vec<u8> = (0x60u8..=0xaf).collect();
         let info: Vec<u8> = (0xb0u8..=0xff).collect();
 
-        let output: ByteArray<82> = Extractor::new(hmac, &salt)
+        let output: ByteArray<82> = Extractor::new(&HMAC_SHA256, &salt)
             .extract(&ikm)
             .expand(&[&info]);
 
@@ -191,12 +188,11 @@ mod test {
 
     #[test]
     fn test_case_3() {
-        let hmac = &ring::hmac::HMAC_SHA256;
         let ikm = &[0x0b; 22];
         let salt = &[];
         let info = &[];
 
-        let output: ByteArray<42> = Extractor::new(hmac, salt)
+        let output: ByteArray<42> = Extractor::new(&HMAC_SHA256, salt)
             .extract(ikm)
             .expand(info);
 
@@ -218,12 +214,10 @@ mod test {
         //
         // >>> hkdf.HKDF(algorithm=hashes.SHA384(), length=96, salt=None, info=b"hello").derive(b"\x0b" * 40)
 
-        let hmac = &ring::hmac::HMAC_SHA384;
-
         let ikm = &[0x0b; 40];
         let info = &[&b"hel"[..], &b"lo"[..]];
 
-        let output: ByteArray<96> = Extractor::without_salt(hmac)
+        let output: ByteArray<96> = Extractor::without_salt(&HMAC_SHA384)
             .extract(ikm)
             .expand(info);
 
@@ -243,13 +237,12 @@ mod test {
 
     #[test]
     fn test_output_length_bounds() {
-        let hmac = &ring::hmac::HMAC_SHA256;
         let ikm = &[];
         let salt = &[];
         let info = &[];
 
         let mut output = [0u8; 32 * 255 + 1];
-        assert!(Extractor::new(hmac, salt)
+        assert!(Extractor::new(&HMAC_SHA256, salt)
             .extract(ikm)
             .expand_slice(info, &mut output)
             .is_err());

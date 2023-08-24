@@ -15,10 +15,10 @@ pub(crate) fn prf(out: &mut [u8], hmac_key: &dyn crypto::hmac::Key, label: &[u8]
     }
 }
 
-#[cfg(all(test, feature = "ring"))]
+#[cfg(all(test, any(feature = "ring", feature = "aws_lc_rs")))]
 mod tests {
     use crate::crypto::hmac::Hmac;
-    use crate::crypto::ring;
+    use crate::primary_provider::hmac::{HMAC_SHA256, HMAC_SHA512};
 
     #[test]
     fn check_sha256() {
@@ -28,12 +28,7 @@ mod tests {
         let expect = include_bytes!("../testdata/prf-result.1.bin");
         let mut output = [0u8; 100];
 
-        super::prf(
-            &mut output,
-            &*ring::hmac::HMAC_SHA256.with_key(secret),
-            label,
-            seed,
-        );
+        super::prf(&mut output, &*HMAC_SHA256.with_key(secret), label, seed);
         assert_eq!(expect.len(), output.len());
         assert_eq!(expect.to_vec(), output.to_vec());
     }
@@ -46,36 +41,26 @@ mod tests {
         let expect = include_bytes!("../testdata/prf-result.2.bin");
         let mut output = [0u8; 196];
 
-        super::prf(
-            &mut output,
-            &*ring::hmac::HMAC_SHA512.with_key(secret),
-            label,
-            seed,
-        );
+        super::prf(&mut output, &*HMAC_SHA512.with_key(secret), label, seed);
         assert_eq!(expect.len(), output.len());
         assert_eq!(expect.to_vec(), output.to_vec());
     }
 }
 
-#[cfg(bench)]
+#[cfg(all(bench, any(feature = "ring", feature = "aws_lc_rs")))]
 mod benchmarks {
+    use crate::crypto::hmac::Hmac;
+    use crate::primary_provider::hmac::HMAC_SHA256;
+
     #[bench]
     fn bench_sha256(b: &mut test::Bencher) {
-        use crate::crypto::hmac::Hmac;
-        use crate::crypto::ring;
-
         let label = &b"extended master secret"[..];
         let seed = [0u8; 32];
         let key = &b"secret"[..];
 
         b.iter(|| {
             let mut out = [0u8; 48];
-            super::prf(
-                &mut out,
-                &*ring::hmac::HMAC_SHA256.with_key(key),
-                &label,
-                &seed,
-            );
+            super::prf(&mut out, &*HMAC_SHA256.with_key(key), &label, &seed);
             test::black_box(out);
         });
     }

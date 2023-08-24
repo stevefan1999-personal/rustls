@@ -785,11 +785,11 @@ where
     f(expander, info)
 }
 
-#[cfg(all(test, feature = "ring"))]
+#[cfg(all(test, any(feature = "ring", feature = "aws_lc_rs")))]
 mod test {
     use super::{derive_traffic_iv, derive_traffic_key, KeySchedule, SecretKind};
-    use crate::crypto::ring::lib::aead;
-    use crate::crypto::ring::tls13::TLS13_CHACHA20_POLY1305_SHA256_INTERNAL;
+    use crate::primary_provider::lib::aead;
+    use crate::primary_provider::tls13::TLS13_CHACHA20_POLY1305_SHA256_INTERNAL;
     use crate::KeyLog;
 
     #[test]
@@ -936,7 +936,7 @@ mod test {
         let aead_alg = &aead::AES_128_GCM;
         let expander = crate::hkdf::Expander::from_okm(
             &traffic_secret,
-            &crate::crypto::ring::hmac::HMAC_SHA256,
+            &crate::primary_provider::hmac::HMAC_SHA256,
         );
         let key = derive_traffic_key(&expander, aead_alg.key_len());
         let key = aead::UnboundKey::new(aead_alg, key.as_ref()).unwrap();
@@ -965,14 +965,13 @@ mod test {
 
 #[cfg(bench)]
 mod benchmarks {
-    #[cfg(feature = "ring")]
+    #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
     #[bench]
     fn bench_sha256(b: &mut test::Bencher) {
         use super::{derive_traffic_iv, derive_traffic_key, KeySchedule, SecretKind};
-        use crate::crypto::ring::tls13::TLS13_CHACHA20_POLY1305_SHA256_INTERNAL;
         use crate::hkdf;
+        use crate::primary_provider::tls13::TLS13_CHACHA20_POLY1305_SHA256_INTERNAL;
         use crate::KeyLog;
-        use ring::aead;
 
         fn extract_traffic_secret(ks: &KeySchedule, kind: SecretKind) {
             struct Log;
@@ -981,17 +980,13 @@ mod benchmarks {
                 fn log(&self, _label: &str, _client_random: &[u8], _secret: &[u8]) {}
             }
 
-            let aead_alg = &aead::CHACHA20_POLY1305;
             let hash = [0u8; 32];
             let traffic_secret = ks.derive_logged_secret(kind, &hash, &Log, &[0u8; 32]);
             let traffic_secret_expander = hkdf::Expander::from_okm(
                 &traffic_secret,
                 TLS13_CHACHA20_POLY1305_SHA256_INTERNAL.hmac_provider,
             );
-            test::black_box(derive_traffic_key(
-                &traffic_secret_expander,
-                aead_alg.key_len(),
-            ));
+            test::black_box(derive_traffic_key(&traffic_secret_expander, 32));
             test::black_box(derive_traffic_iv(&traffic_secret_expander));
         }
 

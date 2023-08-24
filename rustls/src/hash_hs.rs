@@ -163,17 +163,17 @@ impl HandshakeHash {
     }
 }
 
-#[cfg(all(test, feature = "ring"))]
+#[cfg(all(test, any(feature = "ring", feature = "aws_lc_rs")))]
 mod test {
     use super::HandshakeHashBuffer;
-    use crate::crypto::ring;
+    use crate::primary_provider::hash::SHA256;
 
     #[test]
     fn hashes_correctly() {
         let mut hhb = HandshakeHashBuffer::new();
         hhb.update_raw(b"hello");
         assert_eq!(hhb.buffer.len(), 5);
-        let mut hh = hhb.start_hash(&ring::hash::SHA256);
+        let mut hh = hhb.start_hash(&SHA256);
         assert!(hh.client_auth.is_none());
         hh.update_raw(b"world");
         let h = hh.get_current_hash();
@@ -191,7 +191,7 @@ mod test {
         hhb.set_client_auth_enabled();
         hhb.update_raw(b"hello");
         assert_eq!(hhb.buffer.len(), 5);
-        let mut hh = hhb.start_hash(&ring::hash::SHA256);
+        let mut hh = hhb.start_hash(&SHA256);
         assert_eq!(
             hh.client_auth
                 .as_ref()
@@ -221,7 +221,7 @@ mod test {
         hhb.set_client_auth_enabled();
         hhb.update_raw(b"hello");
         assert_eq!(hhb.buffer.len(), 5);
-        let mut hh = hhb.start_hash(&ring::hash::SHA256);
+        let mut hh = hhb.start_hash(&SHA256);
         assert_eq!(
             hh.client_auth
                 .as_ref()

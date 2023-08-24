@@ -5,8 +5,8 @@ use crate::msgs::persist;
 use crate::sign;
 use crate::NamedGroup;
 use crate::ServerName;
-#[cfg(feature = "ring")]
-use crate::{crypto::ring, error::Error, key};
+#[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
+use crate::{error::Error, key, primary_provider};
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -177,12 +177,12 @@ impl client::ResolvesClientCert for FailResolveClientCert {
 pub(super) struct AlwaysResolvesClientCert(Arc<sign::CertifiedKey>);
 
 impl AlwaysResolvesClientCert {
-    #[cfg(feature = "ring")]
+    #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
     pub(super) fn new(
         chain: Vec<key::Certificate>,
         priv_key: &key::PrivateKey,
     ) -> Result<Self, Error> {
-        let key = ring::sign::any_supported_type(priv_key)
+        let key = primary_provider::sign::any_supported_type(priv_key)
             .map_err(|_| Error::General("invalid private key".into()))?;
         Ok(Self(Arc::new(sign::CertifiedKey::new(chain, key))))
     }
@@ -202,7 +202,7 @@ impl client::ResolvesClientCert for AlwaysResolvesClientCert {
     }
 }
 
-#[cfg(all(test, feature = "ring"))]
+#[cfg(all(test, any(feature = "ring", feature = "aws_lc_rs")))]
 mod test {
     use super::NoClientSessionStorage;
     use crate::client::ClientSessionStore;
