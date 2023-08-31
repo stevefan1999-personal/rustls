@@ -392,7 +392,7 @@ impl StdError for SignError {}
 
 #[test]
 fn can_load_ecdsa_nistp256_pkcs8() {
-    let key = key::PrivateKey(include_bytes!("testdata/nistp256key.pkcs8.der").to_vec());
+    let key = key::PrivateKey(include_bytes!("../testdata/nistp256key.pkcs8.der").to_vec());
     assert!(any_supported_type(&key).is_ok());
     assert!(any_ecdsa_type(&key).is_ok());
     assert!(any_eddsa_type(&key).is_err());
@@ -400,7 +400,7 @@ fn can_load_ecdsa_nistp256_pkcs8() {
 
 #[test]
 fn can_load_ecdsa_nistp256_sec1() {
-    let key = key::PrivateKey(include_bytes!("testdata/nistp256key.der").to_vec());
+    let key = key::PrivateKey(include_bytes!("../testdata/nistp256key.der").to_vec());
     assert!(any_supported_type(&key).is_ok());
     assert!(any_ecdsa_type(&key).is_ok());
     assert!(any_eddsa_type(&key).is_err());
@@ -408,7 +408,7 @@ fn can_load_ecdsa_nistp256_sec1() {
 
 #[test]
 fn can_load_ecdsa_nistp384_pkcs8() {
-    let key = key::PrivateKey(include_bytes!("testdata/nistp384key.pkcs8.der").to_vec());
+    let key = key::PrivateKey(include_bytes!("../testdata/nistp384key.pkcs8.der").to_vec());
     assert!(any_supported_type(&key).is_ok());
     assert!(any_ecdsa_type(&key).is_ok());
     assert!(any_eddsa_type(&key).is_err());
@@ -416,7 +416,7 @@ fn can_load_ecdsa_nistp384_pkcs8() {
 
 #[test]
 fn can_load_ecdsa_nistp384_sec1() {
-    let key = key::PrivateKey(include_bytes!("testdata/nistp384key.der").to_vec());
+    let key = key::PrivateKey(include_bytes!("../testdata/nistp384key.der").to_vec());
     assert!(any_supported_type(&key).is_ok());
     assert!(any_ecdsa_type(&key).is_ok());
     assert!(any_eddsa_type(&key).is_err());
@@ -424,7 +424,7 @@ fn can_load_ecdsa_nistp384_sec1() {
 
 #[test]
 fn can_load_eddsa_pkcs8() {
-    let key = key::PrivateKey(include_bytes!("testdata/eddsakey.der").to_vec());
+    let key = key::PrivateKey(include_bytes!("../testdata/eddsakey.der").to_vec());
     assert!(any_supported_type(&key).is_ok());
     assert!(any_eddsa_type(&key).is_ok());
     assert!(any_ecdsa_type(&key).is_err());
@@ -432,7 +432,7 @@ fn can_load_eddsa_pkcs8() {
 
 #[test]
 fn can_load_rsa2048_pkcs8() {
-    let key = key::PrivateKey(include_bytes!("testdata/rsa2048key.pkcs8.der").to_vec());
+    let key = key::PrivateKey(include_bytes!("../testdata/rsa2048key.pkcs8.der").to_vec());
     assert!(any_supported_type(&key).is_ok());
     assert!(any_eddsa_type(&key).is_err());
     assert!(any_ecdsa_type(&key).is_err());
@@ -440,7 +440,7 @@ fn can_load_rsa2048_pkcs8() {
 
 #[test]
 fn can_load_rsa2048_pkcs1() {
-    let key = key::PrivateKey(include_bytes!("testdata/rsa2048key.pkcs1.der").to_vec());
+    let key = key::PrivateKey(include_bytes!("../testdata/rsa2048key.pkcs1.der").to_vec());
     assert!(any_supported_type(&key).is_ok());
     assert!(any_eddsa_type(&key).is_err());
     assert!(any_ecdsa_type(&key).is_err());
