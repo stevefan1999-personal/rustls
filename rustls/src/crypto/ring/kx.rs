@@ -122,3 +122,35 @@ pub static SECP384R1: SupportedKxGroup = SupportedKxGroup {
 
 /// A list of all the key exchange groups supported by rustls.
 pub static ALL_KX_GROUPS: [&SupportedKxGroup; 3] = [&X25519, &SECP256R1, &SECP384R1];
+
+#[cfg(bench)]
+mod benchmarks {
+    use super::{NamedGroup, SupportedKxGroup, ALL_KX_GROUPS};
+    use crate::crypto::KeyExchange;
+
+    fn bench_any(b: &mut test::Bencher, group: NamedGroup) {
+        b.iter(|| {
+            let kx: super::KeyExchange = super::KeyExchange::start(group, &ALL_KX_GROUPS).unwrap();
+            let pub_key = kx.pub_key().to_vec();
+            test::black_box(
+                kx.complete(&pub_key, |output| Ok(output.to_vec()))
+                    .unwrap(),
+            );
+        });
+    }
+
+    #[bench]
+    fn bench_x25519(b: &mut test::Bencher) {
+        bench_any(b, NamedGroup::X25519);
+    }
+
+    #[bench]
+    fn bench_ecdh_p256(b: &mut test::Bencher) {
+        bench_any(b, NamedGroup::secp256r1);
+    }
+
+    #[bench]
+    fn bench_ecdh_p384(b: &mut test::Bencher) {
+        bench_any(b, NamedGroup::secp384r1);
+    }
+}
