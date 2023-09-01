@@ -493,4 +493,49 @@ mod benchmarks {
             );
         });
     }
+
+    #[bench]
+    fn bench_load_and_validate_rsa2048(b: &mut test::Bencher) {
+        let key = key::PrivateKey(include_bytes!("../../testdata/rsa2048key.pkcs8.der").to_vec());
+
+        b.iter(|| {
+            test::black_box(super::any_supported_type(&key).unwrap());
+        });
+    }
+
+    #[bench]
+    fn bench_load_and_validate_rsa4096(b: &mut test::Bencher) {
+        let key = key::PrivateKey(include_bytes!("../../testdata/rsa4096key.pkcs8.der").to_vec());
+
+        b.iter(|| {
+            test::black_box(super::any_supported_type(&key).unwrap());
+        });
+    }
+
+    #[bench]
+    fn bench_load_and_validate_p256(b: &mut test::Bencher) {
+        let key = key::PrivateKey(include_bytes!("../../testdata/nistp256key.pkcs8.der").to_vec());
+
+        b.iter(|| {
+            test::black_box(super::any_ecdsa_type(&key).unwrap());
+        });
+    }
+
+    #[bench]
+    fn bench_load_and_validate_p384(b: &mut test::Bencher) {
+        let key = key::PrivateKey(include_bytes!("../../testdata/nistp384key.pkcs8.der").to_vec());
+
+        b.iter(|| {
+            test::black_box(super::any_ecdsa_type(&key).unwrap());
+        });
+    }
+
+    #[bench]
+    fn bench_load_and_validate_eddsa(b: &mut test::Bencher) {
+        let key = key::PrivateKey(include_bytes!("../../testdata/eddsakey.der").to_vec());
+
+        b.iter(|| {
+            test::black_box(super::any_eddsa_type(&key).unwrap());
+        });
+    }
 }
