@@ -19,3 +19,5 @@ resolver = "2"
 [patch.crates-io]
 # TODO(XXX): Remove this once rcgen has cut a release w/ CRL support included. Only used in examples.
 rcgen = { git = 'https://github.com/est31/rcgen.git', rev = '83e548a06848d923eada1ac66d1a912735b67e79' }
+
+rustls-webpki = { git = 'https://github.com/rustls/webpki', rev = '4aabe619bcfd6598a35e51cafa4047f53c2c107e' }

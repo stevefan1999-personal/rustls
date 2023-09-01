@@ -538,58 +538,63 @@ impl WebPkiSupportedAlgorithms {
     }
 }
 
+#[cfg(all(not(feature = "ring"), feature = "aws_lc_rs"))]
+use webpki::aws_lc_rs as webpki_alg;
+#[cfg(feature = "ring")]
+use webpki::ring as webpki_alg;
+
 /// A `WebPkiSupportedAlgorithms` value that reflects webpki's capabilities when
 /// compiled against *ring*.
 #[cfg(any(feature = "ring", feature = "aws_lc_rs"))]
 pub(crate) static SUPPORTED_SIG_ALGS: WebPkiSupportedAlgorithms = WebPkiSupportedAlgorithms {
     all: &[
-        webpki::ECDSA_P256_SHA256,
-        webpki::ECDSA_P256_SHA384,
-        webpki::ECDSA_P384_SHA256,
-        webpki::ECDSA_P384_SHA384,
-        webpki::ED25519,
-        webpki::RSA_PSS_2048_8192_SHA256_LEGACY_KEY,
-        webpki::RSA_PSS_2048_8192_SHA384_LEGACY_KEY,
-        webpki::RSA_PSS_2048_8192_SHA512_LEGACY_KEY,
-        webpki::RSA_PKCS1_2048_8192_SHA256,
-        webpki::RSA_PKCS1_2048_8192_SHA384,
-        webpki::RSA_PKCS1_2048_8192_SHA512,
-        webpki::RSA_PKCS1_3072_8192_SHA384,
+        webpki_alg::ECDSA_P256_SHA256,
+        webpki_alg::ECDSA_P256_SHA384,
+        webpki_alg::ECDSA_P384_SHA256,
+        webpki_alg::ECDSA_P384_SHA384,
+        webpki_alg::ED25519,
+        webpki_alg::RSA_PSS_2048_8192_SHA256_LEGACY_KEY,
+        webpki_alg::RSA_PSS_2048_8192_SHA384_LEGACY_KEY,
+        webpki_alg::RSA_PSS_2048_8192_SHA512_LEGACY_KEY,
+        webpki_alg::RSA_PKCS1_2048_8192_SHA256,
+        webpki_alg::RSA_PKCS1_2048_8192_SHA384,
+        webpki_alg::RSA_PKCS1_2048_8192_SHA512,
+        webpki_alg::RSA_PKCS1_3072_8192_SHA384,
     ],
     mapping: &[
         // nb. for TLS1.2 the curve is not fixed by SignatureScheme. for TLS1.3 it is.
         (
             SignatureScheme::ECDSA_NISTP384_SHA384,
-            &[webpki::ECDSA_P384_SHA384, webpki::ECDSA_P256_SHA384],
+            &[webpki_alg::ECDSA_P384_SHA384, webpki_alg::ECDSA_P256_SHA384],
         ),
         (
             SignatureScheme::ECDSA_NISTP256_SHA256,
-            &[webpki::ECDSA_P256_SHA256, webpki::ECDSA_P384_SHA256],
+            &[webpki_alg::ECDSA_P256_SHA256, webpki_alg::ECDSA_P384_SHA256],
         ),
-        (SignatureScheme::ED25519, &[webpki::ED25519]),
+        (SignatureScheme::ED25519, &[webpki_alg::ED25519]),
         (
             SignatureScheme::RSA_PSS_SHA512,
-            &[webpki::RSA_PSS_2048_8192_SHA512_LEGACY_KEY],
+            &[webpki_alg::RSA_PSS_2048_8192_SHA512_LEGACY_KEY],
         ),
         (
             SignatureScheme::RSA_PSS_SHA384,
-            &[webpki::RSA_PSS_2048_8192_SHA384_LEGACY_KEY],
+            &[webpki_alg::RSA_PSS_2048_8192_SHA384_LEGACY_KEY],
         ),
         (
             SignatureScheme::RSA_PSS_SHA256,
-            &[webpki::RSA_PSS_2048_8192_SHA256_LEGACY_KEY],
+            &[webpki_alg::RSA_PSS_2048_8192_SHA256_LEGACY_KEY],
         ),
         (
             SignatureScheme::RSA_PKCS1_SHA512,
-            &[webpki::RSA_PKCS1_2048_8192_SHA512],
+            &[webpki_alg::RSA_PKCS1_2048_8192_SHA512],
         ),
         (
             SignatureScheme::RSA_PKCS1_SHA384,
-            &[webpki::RSA_PKCS1_2048_8192_SHA384],
+            &[webpki_alg::RSA_PKCS1_2048_8192_SHA384],
         ),
         (
             SignatureScheme::RSA_PKCS1_SHA256,
-            &[webpki::RSA_PKCS1_2048_8192_SHA256],
+            &[webpki_alg::RSA_PKCS1_2048_8192_SHA256],
         ),
     ],
 };
