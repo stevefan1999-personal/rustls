@@ -224,14 +224,15 @@ impl AeadMetaTls13 for AeadCipherTls13<aes_gcm::Aes256Gcm> {
     const OVERHEAD: usize = 16;
 }
 
-impl AeadMetaTls12 for AeadCipherTls12<aes_gcm::Aes256Gcm> {
-    const OVERHEAD: usize = 16;
+// TODO
+// impl AeadMetaTls12 for AeadCipherTls12<aes_gcm::Aes256Gcm> {
+//     const OVERHEAD: usize = 16;
 
-    fn key_block_shape() -> cipher::KeyBlockShape {
-        cipher::KeyBlockShape {
-            enc_key_len: aes_gcm::Aes256Gcm::key_size(),
-            fixed_iv_len: 12,
-            explicit_nonce_len: 8,
-        }
-    }
-}
+//     fn key_block_shape() -> cipher::KeyBlockShape {
+//         cipher::KeyBlockShape {
+//             enc_key_len: aes_gcm::Aes256Gcm::key_size(),
+//             fixed_iv_len: 12,
+//             explicit_nonce_len: 8,
+//         }
+//     }
+// }
