@@ -1,10 +1,7 @@
-use p256::ecdsa::signature::RandomizedSigner;
-use p256::ecdsa::signature::SignatureEncoding;
-use p256::pkcs8::DecodePrivateKey;
 use rustls::crypto::CryptoProvider;
 use rustls::server::{Acceptor, ClientHello, ResolvesServerCert};
-use rustls::sign::SigningKey;
-use rustls::{sign, PrivateKey, ServerConfig, SignatureAlgorithm, SignatureScheme};
+use rustls::{sign, PrivateKey, ServerConfig};
+use rustls_provider_example::sign::ecdsa::EcdsaSigningKey;
 use rustls_provider_example::Provider;
 use std::io::Write;
 use std::sync::Arc;
@@ -13,69 +10,15 @@ struct TestResolvesServerCert(Arc<sign::CertifiedKey>);
 
 impl TestResolvesServerCert {
     pub fn new(cert_chain: Vec<rustls::Certificate>, key_der: rustls::PrivateKey) -> Self {
-        Self(Arc::new(sign::CertifiedKey::new(
-            cert_chain,
-            Arc::new(
-                EcdsaSigningKey::new(&key_der, SignatureScheme::ECDSA_NISTP256_SHA256).unwrap(),
-            ),
-        )))
+        let key: EcdsaSigningKey<p256::ecdsa::SigningKey> = key_der.try_into().unwrap();
+
+        Self(Arc::new(sign::CertifiedKey::new(cert_chain, Arc::new(key))))
     }
 }
 
 impl ResolvesServerCert for TestResolvesServerCert {
     fn resolve(&self, _client_hello: ClientHello) -> Option<Arc<rustls::sign::CertifiedKey>> {
         Some(self.0.clone())
-    }
-}
-
-struct EcdsaSigningKey {
-    key: Arc<p256::ecdsa::SigningKey>,
-    scheme: SignatureScheme,
-}
-
-impl EcdsaSigningKey {
-    fn new(der: &PrivateKey, scheme: SignatureScheme) -> Result<Self, ()> {
-        p256::ecdsa::SigningKey::from_pkcs8_der(&der.0)
-            .map_err(|_| ())
-            .map(|kp| Self {
-                key: Arc::new(kp),
-                scheme,
-            })
-    }
-}
-
-impl SigningKey for EcdsaSigningKey {
-    fn choose_scheme(&self, offered: &[SignatureScheme]) -> Option<Box<dyn rustls::sign::Signer>> {
-        if offered.contains(&self.scheme) {
-            Some(Box::new(EcdsaSigner {
-                key: Arc::clone(&self.key),
-                scheme: self.scheme,
-            }))
-        } else {
-            None
-        }
-    }
-
-    fn algorithm(&self) -> SignatureAlgorithm {
-        SignatureAlgorithm::ECDSA
-    }
-}
-
-struct EcdsaSigner {
-    key: Arc<p256::ecdsa::SigningKey>,
-    scheme: SignatureScheme,
-}
-
-impl rustls::sign::Signer for EcdsaSigner {
-    fn sign(&self, message: &[u8]) -> Result<Vec<u8>, rustls::Error> {
-        self.key
-            .try_sign_with_rng(&mut rand_core::OsRng, message)
-            .map_err(|_| rustls::Error::General("signing failed".into()))
-            .map(|sig: p256::ecdsa::Signature| sig.to_der().to_vec())
-    }
-
-    fn scheme(&self) -> SignatureScheme {
-        self.scheme
     }
 }
 
@@ -113,7 +56,6 @@ impl TestPki {
             .serialize_der_with_signer(&ca_cert)
             .unwrap();
         let server_key_der = server_cert.serialize_private_key_der();
-
         Self {
             server_cert_der,
             server_key_der,
