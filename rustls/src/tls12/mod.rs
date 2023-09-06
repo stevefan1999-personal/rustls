@@ -76,7 +76,7 @@ pub(crate) struct ConnectionSecrets {
 
 impl ConnectionSecrets {
     pub(crate) fn from_key_exchange(
-        kx: impl crypto::KeyExchange,
+        kx: Box<dyn crypto::ActiveKeyExchange>,
         peer_pub_key: &[u8],
         ems_seed: Option<hash::Output>,
         randoms: ConnectionRandoms,
@@ -96,15 +96,33 @@ impl ConnectionSecrets {
             ),
         };
 
-        kx.complete(peer_pub_key, |secret| {
-            prf::prf(
-                &mut ret.master_secret,
-                &*suite.hmac_provider.with_key(secret),
-                label.as_bytes(),
-                seed.as_ref(),
-            );
-            Ok(())
-        })?;
+        struct FillMasterSecret<'a> {
+            output: &'a mut ConnectionSecrets,
+            label: &'static str,
+            seed: Seed,
+        }
+
+        impl<'a> crypto::SharedSecretSink for FillMasterSecret<'a> {
+            fn process_shared_secret(&mut self, secret: &[u8]) {
+                prf::prf(
+                    &mut self.output.master_secret,
+                    &*self
+                        .output
+                        .suite
+                        .hmac_provider
+                        .with_key(secret),
+                    self.label.as_bytes(),
+                    self.seed.as_ref(),
+                );
+            }
+        }
+
+        let mut sink = FillMasterSecret {
+            output: &mut ret,
+            label,
+            seed,
+        };
+        kx.complete(peer_pub_key, &mut sink)?;
 
         Ok(ret)
     }
@@ -316,13 +334,12 @@ pub(crate) const DOWNGRADE_SENTINEL: [u8; 8] = [0x44, 0x4f, 0x57, 0x4e, 0x47, 0x
 mod tests {
     use super::*;
     use crate::common_state::{CommonState, Side};
-    use crate::crypto::ring::{self, X25519};
-    use crate::crypto::KeyExchange;
+    use crate::crypto::ring::X25519;
     use crate::msgs::handshake::{ClientECDHParams, ServerECDHParams};
 
     #[test]
     fn server_ecdhe_remaining_bytes() {
-        let key = ring::KeyExchange::start(crate::NamedGroup::X25519, &[&X25519]).unwrap();
+        let key = X25519.start().unwrap();
         let server_params = ServerECDHParams::new(key.group(), key.pub_key());
         let mut server_buf = Vec::new();
         server_params.encode(&mut server_buf);

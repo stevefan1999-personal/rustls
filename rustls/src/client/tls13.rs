@@ -6,7 +6,7 @@ use crate::common_state::Side;
 use crate::common_state::{CommonState, State};
 use crate::conn::ConnectionRandoms;
 use crate::crypto;
-use crate::crypto::{CryptoProvider, KeyExchange, SupportedGroup};
+use crate::crypto::{ActiveKeyExchange, CryptoProvider, SharedSecretSink};
 use crate::enums::{
     AlertDescription, ContentType, HandshakeType, ProtocolVersion, SignatureScheme,
 };
@@ -32,7 +32,8 @@ use crate::suites::PartiallyExtractedSecrets;
 use crate::tls13::construct_client_verify_message;
 use crate::tls13::construct_server_verify_message;
 use crate::tls13::key_schedule::{
-    KeyScheduleEarly, KeyScheduleHandshake, KeySchedulePreHandshake, KeyScheduleTraffic,
+    KeyScheduleEarly, KeyScheduleHandshake, KeyScheduleHandshakeStart, KeySchedulePreHandshake,
+    KeyScheduleTraffic,
 };
 use crate::tls13::Tls13CipherSuite;
 use crate::verify::{self, DigitallySignedStruct};
@@ -76,7 +77,7 @@ pub(super) fn handle_server_hello<C: CryptoProvider>(
     transcript: HandshakeHash,
     early_key_schedule: Option<KeyScheduleEarly>,
     hello: ClientHelloDetails,
-    our_key_share: C::KeyExchange,
+    our_key_share: Box<dyn ActiveKeyExchange>,
     mut sent_tls13_fake_ccs: bool,
 ) -> hs::NextStateOrError {
     validate_server_hello(cx.common, server_hello)?;
@@ -150,9 +151,31 @@ pub(super) fn handle_server_hello<C: CryptoProvider>(
         KeySchedulePreHandshake::new(suite)
     };
 
-    let key_schedule = our_key_share.complete(&their_key_share.payload.0, |secret| {
-        Ok(key_schedule_pre_handshake.into_handshake(secret))
-    })?;
+    enum KeyScheduleSecretSink {
+        Input(Option<KeySchedulePreHandshake>),
+        Output(KeyScheduleHandshakeStart),
+    }
+
+    impl SharedSecretSink for KeyScheduleSecretSink {
+        fn process_shared_secret(&mut self, secret: &[u8]) {
+            if let Self::Input(pre_handshake @ Some(_)) = self {
+                *self = Self::Output(
+                    pre_handshake
+                        .take()
+                        .unwrap()
+                        .into_handshake(secret),
+                )
+            }
+        }
+    }
+
+    let mut sink = KeyScheduleSecretSink::Input(Some(key_schedule_pre_handshake));
+    our_key_share.complete(&their_key_share.payload.0, &mut sink)?;
+    let key_schedule = if let KeyScheduleSecretSink::Output(key_schedule) = sink {
+        key_schedule
+    } else {
+        unreachable!();
+    };
 
     // Remember what KX group the server liked for next time.
     config
@@ -207,7 +230,7 @@ fn validate_server_hello(
 pub(super) fn initial_key_share<C: CryptoProvider>(
     config: &ClientConfig<C>,
     server_name: &ServerName,
-) -> Result<C::KeyExchange, Error> {
+) -> Result<Box<dyn ActiveKeyExchange>, Error> {
     let group = config
         .resumption
         .store
@@ -223,10 +246,11 @@ pub(super) fn initial_key_share<C: CryptoProvider>(
                 .kx_groups
                 .first()
                 .expect("No kx groups configured")
-        })
-        .name();
+        });
 
-    KeyExchange::start(group, &config.kx_groups).map_err(|_| Error::FailedToGetRandomBytes)
+    group
+        .start()
+        .map_err(|_| Error::FailedToGetRandomBytes)
 }
 
 /// This implements the horrifying TLS1.3 hack where PSK binders have a
