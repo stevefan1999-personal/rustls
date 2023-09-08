@@ -119,7 +119,7 @@
 //! ```rust,no_run
 //! # #[cfg(feature = "ring")] {
 //! # let root_store: rustls::RootCertStore = panic!();
-//! let config = rustls::ClientConfig::<rustls::crypto::ring::Ring>::builder()
+//! let config = rustls::ClientConfig::builder()
 //!     .with_safe_defaults()
 //!     .with_root_certificates(root_store)
 //!     .with_no_client_auth();
@@ -140,7 +140,7 @@
 //! #      .iter()
 //! #      .cloned()
 //! # );
-//! # let config = rustls::ClientConfig::<rustls::crypto::ring::Ring>::builder()
+//! # let config = rustls::ClientConfig::builder()
 //! #     .with_safe_defaults()
 //! #     .with_root_certificates(root_store)
 //! #     .with_no_client_auth();
@@ -175,7 +175,7 @@
 //!
 //! ```rust,no_run
 //! # #[cfg(feature = "ring")] {
-//! # let mut client = rustls::ClientConnection::new::<rustls::crypto::ring::Ring>(panic!(), panic!()).unwrap();
+//! # let mut client = rustls::ClientConnection::new(panic!(), panic!()).unwrap();
 //! # struct Socket { }
 //! # impl Socket {
 //! #   fn ready_for_write(&self) -> bool { false }

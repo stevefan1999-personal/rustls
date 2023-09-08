@@ -165,21 +165,14 @@ pub struct ConfigBuilder<Side: ConfigSide, State> {
 impl<Side: ConfigSide, State: fmt::Debug> fmt::Debug for ConfigBuilder<Side, State> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let side_name = core::any::type_name::<Side>();
-        let (ty, param) = side_name
+        let (ty, _) = side_name
             .split_once('<')
             .unwrap_or((side_name, ""));
         let (_, name) = ty.rsplit_once("::").unwrap_or(("", ty));
-        let (_, param) = param
-            .rsplit_once("::")
-            .unwrap_or(("", param));
 
-        f.debug_struct(&format!(
-            "ConfigBuilder<{}<{}>, _>",
-            name,
-            param.trim_end_matches('>')
-        ))
-        .field("state", &self.state)
-        .finish()
+        f.debug_struct(&format!("ConfigBuilder<{}, _>", name,))
+            .field("state", &self.state)
+            .finish()
     }
 }
 
