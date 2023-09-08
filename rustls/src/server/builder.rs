@@ -15,14 +15,15 @@ use pki_types::{CertificateDer, PrivateKeyDer};
 use alloc::sync::Arc;
 use core::marker::PhantomData;
 
-impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsVerifier> {
+impl ConfigBuilder<ServerConfig, WantsVerifier> {
     /// Choose how to verify client certificates.
     pub fn with_client_cert_verifier(
         self,
         client_cert_verifier: Arc<dyn ClientCertVerifier>,
-    ) -> ConfigBuilder<ServerConfig<C>, WantsServerCert> {
+    ) -> ConfigBuilder<ServerConfig, WantsServerCert> {
         ConfigBuilder {
             state: WantsServerCert {
+                provider: self.state.provider,
                 cipher_suites: self.state.cipher_suites,
                 kx_groups: self.state.kx_groups,
                 versions: self.state.versions,
@@ -33,7 +34,7 @@ impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsVerifier> {
     }
 
     /// Disable client authentication.
-    pub fn with_no_client_auth(self) -> ConfigBuilder<ServerConfig<C>, WantsServerCert> {
+    pub fn with_no_client_auth(self) -> ConfigBuilder<ServerConfig, WantsServerCert> {
         self.with_client_cert_verifier(Arc::new(NoClientAuth))
     }
 }
@@ -44,13 +45,14 @@ impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsVerifier> {
 /// For more information, see the [`ConfigBuilder`] documentation.
 #[derive(Clone, Debug)]
 pub struct WantsServerCert {
+    provider: &'static dyn CryptoProvider,
     cipher_suites: Vec<SupportedCipherSuite>,
     kx_groups: Vec<&'static dyn SupportedKxGroup>,
     versions: versions::EnabledVersions,
     verifier: Arc<dyn ClientCertVerifier>,
 }
 
-impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsServerCert> {
+impl ConfigBuilder<ServerConfig, WantsServerCert> {
     #[cfg(feature = "ring")]
     /// Sets a single certificate chain and matching private key.  This
     /// certificate and key is used for all subsequent connections,
@@ -69,7 +71,7 @@ impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsServerCert> {
         self,
         cert_chain: Vec<CertificateDer<'static>>,
         key_der: PrivateKeyDer<'static>,
-    ) -> Result<ServerConfig<C>, Error> {
+    ) -> Result<ServerConfig, Error> {
         let resolver = handy::AlwaysResolvesChain::new(cert_chain, &key_der)?;
         Ok(self.with_cert_resolver(Arc::new(resolver)))
     }
@@ -89,14 +91,15 @@ impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsServerCert> {
         cert_chain: Vec<CertificateDer<'static>>,
         key_der: PrivateKeyDer<'static>,
         ocsp: Vec<u8>,
-    ) -> Result<ServerConfig<C>, Error> {
+    ) -> Result<ServerConfig, Error> {
         let resolver = handy::AlwaysResolvesChain::new_with_extras(cert_chain, &key_der, ocsp)?;
         Ok(self.with_cert_resolver(Arc::new(resolver)))
     }
 
     /// Sets a custom [`ResolvesServerCert`].
-    pub fn with_cert_resolver(self, cert_resolver: Arc<dyn ResolvesServerCert>) -> ServerConfig<C> {
+    pub fn with_cert_resolver(self, cert_resolver: Arc<dyn ResolvesServerCert>) -> ServerConfig {
         ServerConfig {
+            provider: self.state.provider,
             cipher_suites: self.state.cipher_suites,
             kx_groups: self.state.kx_groups,
             verifier: self.state.verifier,
@@ -113,7 +116,6 @@ impl<C: CryptoProvider> ConfigBuilder<ServerConfig<C>, WantsServerCert> {
             max_early_data_size: 0,
             send_half_rtt_data: false,
             send_tls13_tickets: 4,
-            provider: PhantomData,
         }
     }
 }

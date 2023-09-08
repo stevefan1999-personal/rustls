@@ -7,7 +7,6 @@ use crate::common_state::Protocol;
 use crate::common_state::Side;
 use crate::common_state::{CommonState, State};
 use crate::conn::ConnectionRandoms;
-use crate::crypto::CryptoProvider;
 use crate::enums::ProtocolVersion;
 use crate::enums::{AlertDescription, ContentType, HandshakeType};
 use crate::error::{Error, PeerIncompatible, PeerMisbehaved};
@@ -78,8 +77,8 @@ mod client_hello {
         Accepted,
     }
 
-    pub(in crate::server) struct CompleteClientHelloHandling<C: CryptoProvider> {
-        pub(in crate::server) config: Arc<ServerConfig<C>>,
+    pub(in crate::server) struct CompleteClientHelloHandling {
+        pub(in crate::server) config: Arc<ServerConfig>,
         pub(in crate::server) transcript: HandshakeHash,
         pub(in crate::server) suite: &'static Tls13CipherSuite,
         pub(in crate::server) randoms: ConnectionRandoms,
@@ -103,7 +102,7 @@ mod client_hello {
         }
     }
 
-    impl<C: CryptoProvider> CompleteClientHelloHandling<C> {
+    impl CompleteClientHelloHandling {
         fn check_binder(
             &self,
             suite: &'static Tls13CipherSuite,
@@ -475,7 +474,7 @@ mod client_hello {
         }
     }
 
-    fn emit_server_hello<C: CryptoProvider>(
+    fn emit_server_hello(
         transcript: &mut HandshakeHash,
         randoms: &ConnectionRandoms,
         suite: &'static Tls13CipherSuite,
@@ -484,7 +483,7 @@ mod client_hello {
         share_and_kxgroup: (&KeyShareEntry, &'static dyn SupportedKxGroup),
         chosen_psk_idx: Option<usize>,
         resuming_psk: Option<&[u8]>,
-        config: &ServerConfig<C>,
+        config: &ServerConfig,
     ) -> Result<KeyScheduleHandshake, Error> {
         let mut extensions = Vec::new();
 
@@ -627,12 +626,12 @@ mod client_hello {
 
     #[allow(unknown_lints)] // The lint allowed below is nightly only for now
     #[cfg_attr(not(feature = "quic"), allow(clippy::needless_pass_by_ref_mut))]
-    fn decide_if_early_data_allowed<C: CryptoProvider>(
+    fn decide_if_early_data_allowed(
         cx: &mut ServerContext<'_>,
         client_hello: &ClientHelloPayload,
         resumedata: Option<&persist::ServerSessionValue>,
         suite: &'static Tls13CipherSuite,
-        config: &ServerConfig<C>,
+        config: &ServerConfig,
     ) -> EarlyDataDecision {
         let early_data_requested = client_hello.early_data_extension_offered();
         let rejected_or_disabled = match early_data_requested {
@@ -687,7 +686,7 @@ mod client_hello {
         }
     }
 
-    fn emit_encrypted_extensions<C: CryptoProvider>(
+    fn emit_encrypted_extensions(
         transcript: &mut HandshakeHash,
         suite: &'static Tls13CipherSuite,
         cx: &mut ServerContext<'_>,
@@ -695,7 +694,7 @@ mod client_hello {
         hello: &ClientHelloPayload,
         resumedata: Option<&persist::ServerSessionValue>,
         extra_exts: Vec<ServerExtension>,
-        config: &ServerConfig<C>,
+        config: &ServerConfig,
     ) -> Result<EarlyDataDecision, Error> {
         let mut ep = hs::ExtensionProcessing::new();
         ep.process_common(config, cx, ocsp_response, hello, resumedata, extra_exts)?;
@@ -719,10 +718,10 @@ mod client_hello {
         Ok(early_data)
     }
 
-    fn emit_certificate_req_tls13<C: CryptoProvider>(
+    fn emit_certificate_req_tls13(
         transcript: &mut HandshakeHash,
         cx: &mut ServerContext<'_>,
-        config: &ServerConfig<C>,
+        config: &ServerConfig,
     ) -> Result<bool, Error> {
         if !config.verifier.offer_client_auth() {
             return Ok(false);
@@ -840,12 +839,12 @@ mod client_hello {
         Ok(())
     }
 
-    fn emit_finished_tls13<C: CryptoProvider>(
+    fn emit_finished_tls13(
         transcript: &mut HandshakeHash,
         randoms: &ConnectionRandoms,
         cx: &mut ServerContext<'_>,
         key_schedule: KeyScheduleHandshake,
-        config: &ServerConfig<C>,
+        config: &ServerConfig,
     ) -> KeyScheduleTrafficWithClientFinishedPending {
         let handshake_hash = transcript.get_current_hash();
         let verify_data = key_schedule.sign_server_finish(&handshake_hash);
@@ -875,12 +874,12 @@ mod client_hello {
     }
 }
 
-struct ExpectAndSkipRejectedEarlyData<C: CryptoProvider> {
+struct ExpectAndSkipRejectedEarlyData {
     skip_data_left: usize,
-    next: Box<hs::ExpectClientHello<C>>,
+    next: Box<hs::ExpectClientHello>,
 }
 
-impl<C: CryptoProvider> State<ServerConnectionData> for ExpectAndSkipRejectedEarlyData<C> {
+impl State<ServerConnectionData> for ExpectAndSkipRejectedEarlyData {
     fn handle(mut self: Box<Self>, cx: &mut ServerContext<'_>, m: Message) -> hs::NextStateOrError {
         /* "The server then ignores early data by skipping all records with an external
          *  content type of "application_data" (indicating that they are encrypted),
@@ -897,15 +896,15 @@ impl<C: CryptoProvider> State<ServerConnectionData> for ExpectAndSkipRejectedEar
     }
 }
 
-struct ExpectCertificate<C: CryptoProvider> {
-    config: Arc<ServerConfig<C>>,
+struct ExpectCertificate {
+    config: Arc<ServerConfig>,
     transcript: HandshakeHash,
     suite: &'static Tls13CipherSuite,
     key_schedule: KeyScheduleTrafficWithClientFinishedPending,
     send_tickets: usize,
 }
 
-impl<C: CryptoProvider> State<ServerConnectionData> for ExpectCertificate<C> {
+impl State<ServerConnectionData> for ExpectCertificate {
     fn handle(mut self: Box<Self>, cx: &mut ServerContext<'_>, m: Message) -> hs::NextStateOrError {
         let certp = require_handshake_msg!(
             m,
@@ -968,8 +967,8 @@ impl<C: CryptoProvider> State<ServerConnectionData> for ExpectCertificate<C> {
     }
 }
 
-struct ExpectCertificateVerify<C: CryptoProvider> {
-    config: Arc<ServerConfig<C>>,
+struct ExpectCertificateVerify {
+    config: Arc<ServerConfig>,
     transcript: HandshakeHash,
     suite: &'static Tls13CipherSuite,
     key_schedule: KeyScheduleTrafficWithClientFinishedPending,
@@ -977,7 +976,7 @@ struct ExpectCertificateVerify<C: CryptoProvider> {
     send_tickets: usize,
 }
 
-impl<C: CryptoProvider> State<ServerConnectionData> for ExpectCertificateVerify<C> {
+impl State<ServerConnectionData> for ExpectCertificateVerify {
     fn handle(mut self: Box<Self>, cx: &mut ServerContext<'_>, m: Message) -> hs::NextStateOrError {
         let rc = {
             let sig = require_handshake_msg!(
@@ -1018,15 +1017,15 @@ impl<C: CryptoProvider> State<ServerConnectionData> for ExpectCertificateVerify<
 // --- Process (any number of) early ApplicationData messages,
 //     followed by a terminating handshake EndOfEarlyData message ---
 
-struct ExpectEarlyData<C: CryptoProvider> {
-    config: Arc<ServerConfig<C>>,
+struct ExpectEarlyData {
+    config: Arc<ServerConfig>,
     transcript: HandshakeHash,
     suite: &'static Tls13CipherSuite,
     key_schedule: KeyScheduleTrafficWithClientFinishedPending,
     send_tickets: usize,
 }
 
-impl<C: CryptoProvider> State<ServerConnectionData> for ExpectEarlyData<C> {
+impl State<ServerConnectionData> for ExpectEarlyData {
     fn handle(mut self: Box<Self>, cx: &mut ServerContext<'_>, m: Message) -> hs::NextStateOrError {
         match m.payload {
             MessagePayload::ApplicationData(payload) => {
@@ -1099,24 +1098,24 @@ fn get_server_session_value(
     )
 }
 
-struct ExpectFinished<C: CryptoProvider> {
-    config: Arc<ServerConfig<C>>,
+struct ExpectFinished {
+    config: Arc<ServerConfig>,
     transcript: HandshakeHash,
     suite: &'static Tls13CipherSuite,
     key_schedule: KeyScheduleTrafficWithClientFinishedPending,
     send_tickets: usize,
 }
 
-impl<C: CryptoProvider> ExpectFinished<C> {
+impl ExpectFinished {
     fn emit_ticket(
         transcript: &HandshakeHash,
         suite: &'static Tls13CipherSuite,
         cx: &mut ServerContext<'_>,
         key_schedule: &KeyScheduleTraffic,
-        config: &ServerConfig<C>,
+        config: &ServerConfig,
     ) -> Result<(), Error> {
-        let nonce = rand::random_vec::<C>(32)?;
-        let age_add = rand::random_u32::<C>()?;
+        let nonce = rand::random_vec(config.provider, 32)?;
+        let age_add = rand::random_u32(config.provider)?;
         let plain = get_server_session_value(
             transcript,
             suite,
@@ -1136,7 +1135,7 @@ impl<C: CryptoProvider> ExpectFinished<C> {
             };
             (ticket, config.ticketer.lifetime())
         } else {
-            let id = rand::random_vec::<C>(32)?;
+            let id = rand::random_vec(config.provider, 32)?;
             let stored = config
                 .session_storage
                 .put(id.clone(), plain);
@@ -1178,7 +1177,7 @@ impl<C: CryptoProvider> ExpectFinished<C> {
     }
 }
 
-impl<C: CryptoProvider> State<ServerConnectionData> for ExpectFinished<C> {
+impl State<ServerConnectionData> for ExpectFinished {
     fn handle(mut self: Box<Self>, cx: &mut ServerContext<'_>, m: Message) -> hs::NextStateOrError {
         let finished =
             require_handshake_msg!(m, HandshakeType::Finished, HandshakePayload::Finished)?;
