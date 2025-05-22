@@ -1,6 +1,5 @@
 use alloc::boxed::Box;
 use alloc::string::ToString;
-use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -14,6 +13,7 @@ use super::server_conn::{ProducesTickets, ServerConfig, ServerConnectionData};
 use crate::check::inappropriate_message;
 use crate::common_state::{CommonState, HandshakeFlightTls12, HandshakeKind, Side, State};
 use crate::conn::ConnectionRandoms;
+use crate::conn::kernel::{Direction, KernelContext, KernelState};
 use crate::crypto::ActiveKeyExchange;
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, PeerIncompatible, PeerMisbehaved};
@@ -24,13 +24,14 @@ use crate::msgs::ccs::ChangeCipherSpecPayload;
 use crate::msgs::codec::Codec;
 use crate::msgs::handshake::{
     CertificateChain, ClientKeyExchangeParams, HandshakeMessagePayload, HandshakePayload,
-    NewSessionTicketPayload, SessionId,
+    NewSessionTicketPayload, NewSessionTicketPayloadTls13, SessionId,
 };
 use crate::msgs::message::{Message, MessagePayload};
 use crate::msgs::persist;
 use crate::suites::PartiallyExtractedSecrets;
+use crate::sync::Arc;
 use crate::tls12::{self, ConnectionSecrets, Tls12CipherSuite};
-use crate::verify;
+use crate::{ConnectionTrafficSecrets, verify};
 
 mod client_hello {
     use pki_types::CertificateDer;
@@ -90,7 +91,7 @@ mod client_hello {
                 .ecpoints_extension()
                 .unwrap_or(&[ECPointFormat::Uncompressed]);
 
-            trace!("ecpoints {:?}", ecpoints_ext);
+            trace!("ecpoints {ecpoints_ext:?}");
 
             if !ecpoints_ext.contains(&ECPointFormat::Uncompressed) {
                 return Err(cx.common.send_fatal_alert(
@@ -146,7 +147,7 @@ mod client_hello {
 
                     self.config
                         .session_storage
-                        .get(&client_hello.session_id.get_encoding())
+                        .get(client_hello.session_id.as_ref())
                 })
                 .and_then(|x| persist::ServerSessionValue::read_bytes(&x).ok())
                 .filter(|resumedata| {
@@ -357,7 +358,7 @@ mod client_hello {
                 extensions: ep.exts,
             }),
         };
-        trace!("sending server hello {:?}", sh);
+        trace!("sending server hello {sh:?}");
         flight.add(sh);
 
         Ok(ep.send_ticket)
@@ -444,7 +445,7 @@ mod client_hello {
             payload: HandshakePayload::CertificateRequest(cr),
         };
 
-        trace!("Sending CertificateRequest {:?}", creq);
+        trace!("Sending CertificateRequest {creq:?}");
         flight.add(creq);
         Ok(true)
     }
@@ -491,7 +492,7 @@ impl State<ServerConnectionData> for ExpectCertificate {
             .verifier
             .client_auth_mandatory();
 
-        trace!("certs {:?}", cert_chain);
+        trace!("certs {cert_chain:?}");
 
         let client_cert = match cert_chain.split_first() {
             None if mandatory => {
@@ -583,7 +584,11 @@ impl State<ServerConnectionData> for ExpectClientKx<'_> {
             ems_seed,
             self.randoms,
             self.suite,
-        )?;
+        )
+        .map_err(|err| {
+            cx.common
+                .send_fatal_alert(AlertDescription::IllegalParameter, err)
+        })?;
         cx.common.kx_state.complete();
 
         self.config.key_log.log(
@@ -594,8 +599,8 @@ impl State<ServerConnectionData> for ExpectClientKx<'_> {
         cx.common
             .start_encryption_tls12(&secrets, Side::Server);
 
-        if let Some(client_cert) = self.client_cert {
-            Ok(Box::new(ExpectCertificateVerify {
+        match self.client_cert {
+            Some(client_cert) => Ok(Box::new(ExpectCertificateVerify {
                 config: self.config,
                 secrets,
                 transcript: self.transcript,
@@ -603,9 +608,8 @@ impl State<ServerConnectionData> for ExpectClientKx<'_> {
                 using_ems: self.using_ems,
                 client_cert,
                 send_ticket: self.send_ticket,
-            }))
-        } else {
-            Ok(Box::new(ExpectCcs {
+            })),
+            _ => Ok(Box::new(ExpectCcs {
                 config: self.config,
                 secrets,
                 transcript: self.transcript,
@@ -613,7 +617,7 @@ impl State<ServerConnectionData> for ExpectClientKx<'_> {
                 using_ems: self.using_ems,
                 resuming: false,
                 send_ticket: self.send_ticket,
-            }))
+            })),
         }
     }
 
@@ -742,7 +746,7 @@ impl State<ServerConnectionData> for ExpectCcs {
                 return Err(inappropriate_message(
                     &payload,
                     &[ContentType::ChangeCipherSpec],
-                ))
+                ));
             }
         }
 
@@ -906,7 +910,8 @@ impl State<ServerConnectionData> for ExpectFinished {
             let worked = self
                 .config
                 .session_storage
-                .put(self.session_id.get_encoding(), value.get_encoding());
+                .put(self.session_id.as_ref().to_vec(), value.get_encoding());
+            #[cfg_attr(not(feature = "logging"), allow(clippy::if_same_then_else))]
             if worked {
                 debug!("Session saved");
             } else {
@@ -995,7 +1000,29 @@ impl State<ServerConnectionData> for ExpectTraffic {
             .extract_secrets(Side::Server)
     }
 
+    fn into_external_state(self: Box<Self>) -> Result<Box<dyn KernelState + 'static>, Error> {
+        Ok(self)
+    }
+
     fn into_owned(self: Box<Self>) -> hs::NextState<'static> {
         self
+    }
+}
+
+impl KernelState for ExpectTraffic {
+    fn update_secrets(&mut self, _: Direction) -> Result<ConnectionTrafficSecrets, Error> {
+        Err(Error::General(
+            "TLS 1.2 connections do not support traffic secret updates".into(),
+        ))
+    }
+
+    fn handle_new_session_ticket(
+        &mut self,
+        _cx: &mut KernelContext<'_>,
+        _message: &NewSessionTicketPayloadTls13,
+    ) -> Result<(), Error> {
+        unreachable!(
+            "server connections should never have handle_new_session_ticket called on them"
+        )
     }
 }

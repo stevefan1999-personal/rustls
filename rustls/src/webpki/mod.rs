@@ -1,12 +1,14 @@
-#[cfg(feature = "std")]
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 
 use pki_types::CertificateRevocationListDer;
-use webpki::{CertRevocationList, OwnedCertRevocationList};
+use webpki::{CertRevocationList, InvalidNameContext, OwnedCertRevocationList};
 
-use crate::error::{CertRevocationListError, CertificateError, Error, OtherError};
+use crate::error::{
+    CertRevocationListError, CertificateError, Error, ExtendedKeyPurpose, OtherError,
+};
+#[cfg(feature = "std")]
+use crate::sync::Arc;
 
 mod anchors;
 mod client_verifier;
@@ -19,9 +21,12 @@ pub use server_verifier::{ServerCertVerifierBuilder, WebPkiServerVerifier};
 // Conditionally exported from crate.
 #[allow(unreachable_pub)]
 pub use verify::{
-    verify_server_cert_signed_by_trust_anchor, verify_server_name, ParsedCertificate,
+    ParsedCertificate, verify_server_cert_signed_by_trust_anchor, verify_server_name,
 };
-pub use verify::{verify_tls12_signature, verify_tls13_signature, WebPkiSupportedAlgorithms};
+pub use verify::{
+    WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature,
+    verify_tls13_signature_with_raw_key,
+};
 
 /// An error that can occur when building a certificate verifier.
 #[derive(Debug, Clone)]
@@ -43,7 +48,7 @@ impl fmt::Display for VerifierBuilderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoRootAnchors => write!(f, "no root trust anchors were provided"),
-            Self::InvalidCrl(e) => write!(f, "provided CRL could not be parsed: {:?}", e),
+            Self::InvalidCrl(e) => write!(f, "provided CRL could not be parsed: {e:?}"),
         }
     }
 }
@@ -55,13 +60,27 @@ fn pki_error(error: webpki::Error) -> Error {
     use webpki::Error::*;
     match error {
         BadDer | BadDerTime | TrailingData(_) => CertificateError::BadEncoding.into(),
-        CertNotValidYet => CertificateError::NotValidYet.into(),
-        CertExpired | InvalidCertValidity => CertificateError::Expired.into(),
+        CertNotValidYet { time, not_before } => {
+            CertificateError::NotValidYetContext { time, not_before }.into()
+        }
+        CertExpired { time, not_after } => {
+            CertificateError::ExpiredContext { time, not_after }.into()
+        }
+        InvalidCertValidity => CertificateError::Expired.into(),
         UnknownIssuer => CertificateError::UnknownIssuer.into(),
-        CertNotValidForName => CertificateError::NotValidForName.into(),
+        CertNotValidForName(InvalidNameContext {
+            expected,
+            presented,
+        }) => CertificateError::NotValidForNameContext {
+            expected,
+            presented,
+        }
+        .into(),
         CertRevoked => CertificateError::Revoked.into(),
         UnknownRevocationStatus => CertificateError::UnknownRevocationStatus.into(),
-        CrlExpired => CertificateError::ExpiredRevocationList.into(),
+        CrlExpired { time, next_update } => {
+            CertificateError::ExpiredRevocationListContext { time, next_update }.into()
+        }
         IssuerNotCrlSigner => CertRevocationListError::IssuerInvalidForCrl.into(),
 
         InvalidSignatureForPublicKey
@@ -72,6 +91,19 @@ fn pki_error(error: webpki::Error) -> Error {
         | UnsupportedCrlSignatureAlgorithm
         | UnsupportedCrlSignatureAlgorithmForPublicKey => {
             CertRevocationListError::BadSignature.into()
+        }
+
+        #[allow(deprecated)]
+        RequiredEkuNotFound => CertificateError::InvalidPurpose.into(),
+        RequiredEkuNotFoundContext(webpki::RequiredEkuNotFoundContext { required, present }) => {
+            CertificateError::InvalidPurposeContext {
+                required: ExtendedKeyPurpose::for_values(required.oid_values()),
+                presented: present
+                    .into_iter()
+                    .map(|eku| ExtendedKeyPurpose::for_values(eku.into_iter()))
+                    .collect(),
+            }
+            .into()
         }
 
         _ => CertificateError::Other(OtherError(
@@ -117,7 +149,7 @@ fn parse_crls(
 mod tests {
     #[test]
     fn pki_crl_errors() {
-        use super::{pki_error, CertRevocationListError, CertificateError, Error};
+        use super::{CertRevocationListError, CertificateError, Error, pki_error};
 
         // CRL signature errors should be turned into BadSignature.
         assert_eq!(
@@ -148,8 +180,8 @@ mod tests {
 
     #[test]
     fn crl_error_from_webpki() {
-        use super::crl_error;
         use super::CertRevocationListError::*;
+        use super::crl_error;
 
         let testcases = &[
             (webpki::Error::InvalidCrlSignatureForPublicKey, BadSignature),
@@ -186,7 +218,7 @@ mod tests {
             ),
         ];
         for t in testcases {
-            assert_eq!(crl_error(t.0), t.1);
+            assert_eq!(crl_error(t.0.clone()), t.1);
         }
 
         assert!(matches!(

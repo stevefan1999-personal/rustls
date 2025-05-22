@@ -1,11 +1,9 @@
 use alloc::boxed::Box;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::Debug;
-use std::error::Error as StdError;
 
-use hpke_rs_crypto::types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm};
 use hpke_rs_crypto::HpkeCrypto;
+use hpke_rs_crypto::types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm};
 use hpke_rs_rust_crypto::HpkeRustCrypto;
 use rustls::crypto::hpke::{
     EncapsulatedSecret, Hpke, HpkeOpener, HpkePrivateKey, HpkePublicKey, HpkeSealer, HpkeSuite,
@@ -214,13 +212,13 @@ impl HpkeOpener for HpkeRsReceiver {
 }
 
 #[cfg(feature = "std")]
-fn other_err(err: impl StdError + Send + Sync + 'static) -> Error {
-    Error::Other(OtherError(Arc::new(err)))
+fn other_err(err: impl core::error::Error + Send + Sync + 'static) -> Error {
+    Error::Other(OtherError(alloc::sync::Arc::new(err)))
 }
 
 #[cfg(not(feature = "std"))]
-fn other_err(err: impl Send + Sync + 'static) -> Error {
-    Error::General(alloc::format!("{}", err));
+fn other_err(_err: impl core::any::Any) -> Error {
+    Error::Other(OtherError())
 }
 
 #[cfg(test)]
@@ -289,8 +287,10 @@ mod tests {
     #[test]
     fn test_fips() {
         // None of the rust-crypto backed hpke-rs suites should be considered FIPS approved.
-        assert!(ALL_SUPPORTED_SUITES
-            .iter()
-            .all(|suite| !suite.fips()));
+        assert!(
+            ALL_SUPPORTED_SUITES
+                .iter()
+                .all(|suite| !suite.fips())
+        );
     }
 }

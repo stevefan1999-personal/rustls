@@ -26,10 +26,10 @@ use std::{process, str};
 
 use clap::Parser;
 use mio::net::TcpStream;
-use rustls::crypto::{aws_lc_rs as provider, CryptoProvider};
+use rustls::RootCertStore;
+use rustls::crypto::{CryptoProvider, aws_lc_rs as provider};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-use rustls::RootCertStore;
 
 const CLIENT: mio::Token = mio::Token(0);
 
@@ -93,7 +93,7 @@ impl TlsClient {
                 if error.kind() == io::ErrorKind::WouldBlock {
                     return;
                 }
-                println!("TLS read error: {:?}", error);
+                println!("TLS read error: {error:?}");
                 self.closing = true;
                 return;
             }
@@ -115,7 +115,7 @@ impl TlsClient {
         let io_state = match self.tls_conn.process_new_packets() {
             Ok(io_state) => io_state,
             Err(err) => {
-                println!("TLS error: {:?}", err);
+                println!("TLS error: {err}");
                 self.closing = true;
                 return;
             }
@@ -291,7 +291,7 @@ fn lookup_suites(suites: &[String]) -> Vec<rustls::SupportedCipherSuite> {
         let scs = find_suite(csname);
         match scs {
             Some(s) => out.push(s),
-            None => panic!("cannot look up ciphersuite '{}'", csname),
+            None => panic!("cannot look up ciphersuite '{csname}'"),
         }
     }
 
@@ -306,10 +306,7 @@ fn lookup_versions(versions: &[String]) -> Vec<&'static rustls::SupportedProtoco
         let version = match vname.as_ref() {
             "1.2" => &rustls::version::TLS12,
             "1.3" => &rustls::version::TLS13,
-            _ => panic!(
-                "cannot look up version '{}', valid are '1.2' and '1.3'",
-                vname
-            ),
+            _ => panic!("cannot look up version '{vname}', valid are '1.2' and '1.3'"),
         };
         out.push(version);
     }
@@ -329,10 +326,10 @@ fn load_private_key(filename: &str) -> PrivateKeyDer<'static> {
 }
 
 mod danger {
-    use pki_types::{CertificateDer, ServerName, UnixTime};
-    use rustls::client::danger::HandshakeSignatureValid;
-    use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
     use rustls::DigitallySignedStruct;
+    use rustls::client::danger::HandshakeSignatureValid;
+    use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
+    use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 
     #[derive(Debug)]
     pub struct NoCertificateVerification(CryptoProvider);
@@ -526,7 +523,7 @@ fn main() {
             // Polling can be interrupted (e.g. by a debugger) - retry if so.
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => {
-                panic!("poll failed: {:?}", e)
+                panic!("poll failed: {e:?}")
             }
         }
 

@@ -10,14 +10,13 @@ use crate::crypto::cipher::{AeadKey, Iv};
 use crate::crypto::tls13::{Hkdf, HkdfExpander, OkmBlock};
 use crate::enums::AlertDescription;
 use crate::error::Error;
+use crate::tls13::Tls13CipherSuite;
 use crate::tls13::key_schedule::{
     hkdf_expand_label, hkdf_expand_label_aead_key, hkdf_expand_label_block,
 };
-use crate::tls13::Tls13CipherSuite;
 
 #[cfg(feature = "std")]
 mod connection {
-    use alloc::sync::Arc;
     use alloc::vec;
     use alloc::vec::Vec;
     use core::fmt::{self, Debug};
@@ -27,7 +26,7 @@ mod connection {
 
     use super::{DirectionalKeys, KeyChange, Version};
     use crate::client::{ClientConfig, ClientConnectionData};
-    use crate::common_state::{CommonState, Protocol, DEFAULT_BUFFER_LIMIT};
+    use crate::common_state::{CommonState, DEFAULT_BUFFER_LIMIT, Protocol};
     use crate::conn::{ConnectionCore, SideData};
     use crate::enums::{AlertDescription, ContentType, ProtocolVersion};
     use crate::error::Error;
@@ -35,6 +34,7 @@ mod connection {
     use crate::msgs::handshake::{ClientExtension, ServerExtension};
     use crate::msgs::message::InboundPlainMessage;
     use crate::server::{ServerConfig, ServerConnectionData};
+    use crate::sync::Arc;
     use crate::vecbuf::ChunkVecBuffer;
 
     /// A QUIC client or server connection.
@@ -164,6 +164,23 @@ mod connection {
             name: ServerName<'static>,
             params: Vec<u8>,
         ) -> Result<Self, Error> {
+            Self::new_with_alpn(
+                Arc::clone(&config),
+                quic_version,
+                name,
+                params,
+                config.alpn_protocols.clone(),
+            )
+        }
+
+        /// Make a new QUIC ClientConnection with custom ALPN protocols.
+        pub fn new_with_alpn(
+            config: Arc<ClientConfig>,
+            quic_version: Version,
+            name: ServerName<'static>,
+            params: Vec<u8>,
+            alpn_protocols: Vec<Vec<u8>>,
+        ) -> Result<Self, Error> {
             if !config.supports_version(ProtocolVersion::TLSv1_3) {
                 return Err(Error::General(
                     "TLS 1.3 support is required for QUIC".into(),
@@ -181,7 +198,13 @@ mod connection {
                 Version::V1 | Version::V2 => ClientExtension::TransportParameters(params),
             };
 
-            let mut inner = ConnectionCore::for_client(config, name, vec![ext], Protocol::Quic)?;
+            let mut inner = ConnectionCore::for_client(
+                config,
+                name,
+                alpn_protocols,
+                vec![ext],
+                Protocol::Quic,
+            )?;
             inner.common_state.quic.version = quic_version;
             Ok(Self {
                 inner: inner.into(),
@@ -383,10 +406,6 @@ mod connection {
                 &Locator::new(self.deframer_buffer.filled()),
                 range.end,
             );
-
-            // `core.process_new_packets` should not process any data in `deframer_buffer`;
-            // it is already ready in `hs_deframer`.
-            self.deframer_buffer.processed = range.end;
 
             self.core
                 .hs_deframer

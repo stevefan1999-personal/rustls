@@ -5,10 +5,11 @@ use alloc::vec::Vec;
 use pki_types::{DnsName, EchConfigListBytes, ServerName};
 use subtle::ConstantTimeEq;
 
+use crate::CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV;
 use crate::client::tls13;
+use crate::crypto::SecureRandom;
 use crate::crypto::hash::Hash;
 use crate::crypto::hpke::{EncapsulatedSecret, Hpke, HpkePublicKey, HpkeSealer, HpkeSuite};
-use crate::crypto::SecureRandom;
 use crate::hash_hs::{HandshakeHash, HandshakeHashBuffer};
 use crate::log::{debug, trace, warn};
 use crate::msgs::base::{Payload, PayloadU16};
@@ -18,15 +19,14 @@ use crate::msgs::handshake::{
     ClientExtension, ClientHelloPayload, EchConfigContents, EchConfigPayload, Encoding,
     EncryptedClientHello, EncryptedClientHelloOuter, HandshakeMessagePayload, HandshakePayload,
     HelloRetryRequest, HpkeKeyConfig, HpkeSymmetricCipherSuite, PresharedKeyBinder,
-    PresharedKeyOffer, Random, ServerHelloPayload,
+    PresharedKeyOffer, Random, ServerHelloPayload, ServerNamePayload,
 };
 use crate::msgs::message::{Message, MessagePayload};
 use crate::msgs::persist;
 use crate::msgs::persist::Retrieved;
 use crate::tls13::key_schedule::{
-    server_ech_hrr_confirmation_secret, KeyScheduleEarly, KeyScheduleHandshakeStart,
+    KeyScheduleEarly, KeyScheduleHandshakeStart, server_ech_hrr_confirmation_secret,
 };
-use crate::CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV;
 use crate::{
     AlertDescription, CommonState, EncryptedClientHelloError, Error, HandshakeType,
     PeerIncompatible, PeerMisbehaved, ProtocolVersion, Tls13CipherSuite,
@@ -93,9 +93,9 @@ impl EchConfig {
     /// One of the provided ECH configurations must be compatible with the HPKE provider's supported
     /// suites or an error will be returned.
     ///
-    /// See the [ech-client.rs] example for a complete example of fetching ECH configs from DNS.
+    /// See the [`ech-client.rs`] example for a complete example of fetching ECH configs from DNS.
     ///
-    /// [ech-client.rs]: https://github.com/rustls/rustls/blob/main/examples/src/bin/ech-client.rs
+    /// [`ech-client.rs`]: https://github.com/rustls/rustls/blob/main/examples/src/bin/ech-client.rs
     pub fn new(
         ech_config_list: EchConfigListBytes<'_>,
         hpke_suites: &[&'static dyn Hpke],
@@ -107,7 +107,7 @@ impl EchConfig {
 
         // Note: we name the index var _i because if the log feature is disabled
         //       it is unused.
-        #[cfg_attr(not(feature = "std"), allow(clippy::unused_enumerate_index))]
+        #[cfg_attr(not(feature = "logging"), allow(clippy::unused_enumerate_index))]
         for (_i, config) in ech_configs.iter().enumerate() {
             let contents = match config {
                 EchConfigPayload::V18(contents) => contents,
@@ -219,7 +219,7 @@ impl EchGreaseConfig {
                     key_config: HpkeKeyConfig {
                         config_id: config_id[0],
                         kem_id: HpkeKem::DHKEM_P256_HKDF_SHA256,
-                        public_key: PayloadU16(self.placeholder_key.0.clone()),
+                        public_key: PayloadU16::new(self.placeholder_key.0.clone()),
                         symmetric_cipher_suites: vec![suite.sym],
                     },
                     maximum_name_length: 0,
@@ -255,7 +255,7 @@ impl EchGreaseConfig {
             EncryptedClientHello::Outer(EncryptedClientHelloOuter {
                 cipher_suite: suite.sym,
                 config_id: config_id[0],
-                enc: PayloadU16(grease_state.enc.0),
+                enc: PayloadU16::new(grease_state.enc.0),
                 payload: PayloadU16::new(payload),
             }),
         ))
@@ -321,12 +321,10 @@ impl EchState {
         secure_random: &'static dyn SecureRandom,
         enable_sni: bool,
     ) -> Result<Self, Error> {
-        // TODO(XXX): this would be cleaner as a `let..else` statement once MSRV is 1.64+
-        let config_contents = match &config.config {
-            EchConfigPayload::V18(config_contents) => config_contents,
+        let EchConfigPayload::V18(config_contents) = &config.config else {
             // the public EchConfig::new() constructor ensures we only have supported
             // configurations.
-            _ => unreachable!("ECH config version mismatch"),
+            unreachable!("ECH config version mismatch");
         };
         let key_config = &config_contents.key_config;
 
@@ -501,7 +499,7 @@ impl EchState {
                         AlertDescription::DecodeError,
                         PeerMisbehaved::IllegalHelloRetryRequestWithInvalidEch,
                     )
-                })
+                });
             }
             Some(ech_conf) => ech_conf,
         };
@@ -622,7 +620,9 @@ impl EchState {
                 if let Some(sni_value) = inner_sni {
                     inner_hello
                         .extensions
-                        .push(ClientExtension::make_sni(&sni_value.borrow()));
+                        .push(ClientExtension::ServerName(ServerNamePayload::from(
+                            sni_value,
+                        )));
                 }
                 // We don't want to add, or compress, the SNI from the outer hello.
                 continue;
@@ -685,7 +685,7 @@ impl EchState {
             };
         }
 
-        trace!("ECH Inner Hello: {:#?}", inner_hello);
+        trace!("ECH Inner Hello: {inner_hello:#?}");
 
         // Encode the inner hello according to the rules required for ECH. This differs
         // from the standard encoding in several ways. Notably this is where we will

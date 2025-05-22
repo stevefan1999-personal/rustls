@@ -4,14 +4,14 @@
 //! executable, and runs tests in an indeterminate order.  That restricts us
 //! to doing all the desired tests, in series, in one function.
 
+use rustls::ClientConfig;
+use rustls::crypto::CryptoProvider;
 #[cfg(all(feature = "aws_lc_rs", not(feature = "ring")))]
 use rustls::crypto::aws_lc_rs as provider;
 #[cfg(all(feature = "ring", not(feature = "aws_lc_rs")))]
 use rustls::crypto::ring as provider;
 #[cfg(all(feature = "ring", feature = "aws_lc_rs"))]
 use rustls::crypto::ring as provider;
-use rustls::crypto::CryptoProvider;
-use rustls::ClientConfig;
 
 mod common;
 use crate::common::*;
@@ -50,11 +50,12 @@ fn test_ring_used_as_implicit_provider() {
     // implicitly installs ring provider
     finish_client_config(KeyType::Rsa2048, ClientConfig::builder());
 
-    assert!(format!(
-        "{:?}",
-        CryptoProvider::get_default().expect("provider missing")
-    )
-    .contains("secure_random: Ring"));
+    let default = CryptoProvider::get_default().expect("provider missing");
+    let debug = format!("{default:?}");
+    assert!(debug.contains("secure_random: Ring"));
+
+    let builder = ClientConfig::builder();
+    assert_eq!(format!("{:?}", builder.crypto_provider()), debug);
 }
 
 fn test_aws_lc_rs_used_as_implicit_provider() {
@@ -63,9 +64,10 @@ fn test_aws_lc_rs_used_as_implicit_provider() {
     // implicitly installs aws-lc-rs provider
     finish_client_config(KeyType::Rsa2048, ClientConfig::builder());
 
-    assert!(format!(
-        "{:?}",
-        CryptoProvider::get_default().expect("provider missing")
-    )
-    .contains("secure_random: AwsLcRs"));
+    let default = CryptoProvider::get_default().expect("provider missing");
+    let debug = format!("{default:?}");
+    assert!(debug.contains("secure_random: AwsLcRs"));
+
+    let builder = ClientConfig::builder();
+    assert_eq!(format!("{:?}", builder.crypto_provider()), debug);
 }

@@ -8,11 +8,11 @@ Rustls is a modern TLS library written in Rust.
 
 # rustls-post-quantum
 
-This crate provides experimental support for [X25519Kyber768Draft00] post-quantum
-key exchange. See [the documentation][docs] for more details.
+The functionality of this crate became part of the core rustls
+crate from the 0.23.22 release. When using that version of the crate,
+use the `prefer-post-quantum` Cargo feature to control whether to prefer
+using post-quantum algorithms instead of using this crate.
 
 This crate is release under the same licenses as the [main rustls crate][rustls].
 
-[X25519Kyber768Draft00]: https://datatracker.ietf.org/doc/draft-tls-westerbaan-xyber768d00/03/
-[docs]: https://docs.rs/rustls-post-quantum/latest/
 [rustls]: https://crates.io/crates/rustls

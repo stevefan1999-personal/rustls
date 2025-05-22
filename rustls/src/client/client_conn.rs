@@ -1,4 +1,3 @@
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
@@ -8,6 +7,8 @@ use pki_types::{ServerName, UnixTime};
 
 use super::handy::NoClientSessionStorage;
 use super::hs;
+#[cfg(feature = "std")]
+use crate::WantsVerifier;
 use crate::builder::ConfigBuilder;
 use crate::client::{EchMode, EchStatus};
 use crate::common_state::{CommonState, Protocol, Side};
@@ -15,20 +16,20 @@ use crate::conn::{ConnectionCore, UnbufferedConnectionCommon};
 use crate::crypto::{CryptoProvider, SupportedKxGroup};
 use crate::enums::{CipherSuite, ProtocolVersion, SignatureScheme};
 use crate::error::Error;
+use crate::kernel::KernelConnection;
 use crate::log::trace;
 use crate::msgs::enums::NamedGroup;
 use crate::msgs::handshake::ClientExtension;
 use crate::msgs::persist;
-use crate::suites::SupportedCipherSuite;
+use crate::suites::{ExtractedSecrets, SupportedCipherSuite};
+use crate::sync::Arc;
 #[cfg(feature = "std")]
 use crate::time_provider::DefaultTimeProvider;
 use crate::time_provider::TimeProvider;
 use crate::unbuffered::{EncryptError, TransmitTlsData};
-#[cfg(feature = "std")]
-use crate::WantsVerifier;
-use crate::{compress, sign, verify, versions, KeyLog, WantsVersions};
 #[cfg(doc)]
-use crate::{crypto, DistinguishedName};
+use crate::{DistinguishedName, crypto};
+use crate::{KeyLog, WantsVersions, compress, sign, verify, versions};
 
 /// A trait for the ability to store client session data, so that sessions
 /// can be resumed in future connections.
@@ -120,6 +121,13 @@ pub trait ResolvesClientCert: fmt::Debug + Send + Sync {
         sigschemes: &[SignatureScheme],
     ) -> Option<Arc<sign::CertifiedKey>>;
 
+    /// Return true if the client only supports raw public keys.
+    ///
+    /// See [RFC 7250](https://www.rfc-editor.org/rfc/rfc7250).
+    fn only_raw_public_keys(&self) -> bool {
+        false
+    }
+
     /// Return true if any certificates at all are available.
     fn has_certs(&self) -> bool;
 }
@@ -144,7 +152,7 @@ pub trait ResolvesClientCert: fmt::Debug + Send + Sync {
 ///
 /// * [`ClientConfig::max_fragment_size`]: the default is `None` (meaning 16kB).
 /// * [`ClientConfig::resumption`]: supports resumption with up to 256 server names, using session
-///    ids or tickets, with a max of eight tickets per server.
+///   ids or tickets, with a max of eight tickets per server.
 /// * [`ClientConfig::alpn_protocols`]: the default is empty -- no ALPN protocol is negotiated.
 /// * [`ClientConfig::key_log`]: key material is not logged.
 /// * [`ClientConfig::cert_decompressors`]: depends on the crate features, see [`compress::default_cert_decompressors()`].
@@ -159,6 +167,22 @@ pub struct ClientConfig {
     pub alpn_protocols: Vec<Vec<u8>>,
 
     /// How and when the client can resume a previous session.
+    ///
+    /// # Sharing `resumption` between `ClientConfig`s
+    /// In a program using many `ClientConfig`s it may improve resumption rates
+    /// (which has a significant impact on connection performance) if those
+    /// configs share a single `Resumption`.
+    ///
+    /// However, resumption is only allowed between two `ClientConfig`s if their
+    /// `client_auth_cert_resolver` (ie, potential client authentication credentials)
+    /// and `verifier` (ie, server certificate verification settings) are
+    /// the same (according to `Arc::ptr_eq`).
+    ///
+    /// To illustrate, imagine two `ClientConfig`s `A` and `B`.  `A` fully validates
+    /// the server certificate, `B` does not.  If `A` and `B` shared a resumption store,
+    /// it would be possible for a session originated by `B` to be inserted into the
+    /// store, and then resumed by `A`.  This would give a false impression to the user
+    /// of `A` that the server certificate is fully validated.
     pub resumption: Resumption,
 
     /// The maximum size of plaintext input to be emitted in a single TLS record.
@@ -309,10 +333,9 @@ impl ClientConfig {
         provider: Arc<CryptoProvider>,
     ) -> ConfigBuilder<Self, WantsVersions> {
         ConfigBuilder {
-            state: WantsVersions {
-                provider,
-                time_provider: Arc::new(DefaultTimeProvider),
-            },
+            state: WantsVersions {},
+            provider,
+            time_provider: Arc::new(DefaultTimeProvider),
             side: PhantomData,
         }
     }
@@ -335,10 +358,9 @@ impl ClientConfig {
         time_provider: Arc<dyn TimeProvider>,
     ) -> ConfigBuilder<Self, WantsVersions> {
         ConfigBuilder {
-            state: WantsVersions {
-                provider,
-                time_provider,
-            },
+            state: WantsVersions {},
+            provider,
+            time_provider,
             side: PhantomData,
         }
     }
@@ -506,10 +528,9 @@ pub enum Tls12Resumption {
 
 /// Container for unsafe APIs
 pub(super) mod danger {
-    use alloc::sync::Arc;
-
-    use super::verify::ServerCertVerifier;
     use super::ClientConfig;
+    use super::verify::ServerCertVerifier;
+    use crate::sync::Arc;
 
     /// Accessor for dangerous configuration options.
     #[derive(Debug)]
@@ -518,7 +539,7 @@ pub(super) mod danger {
         pub cfg: &'a mut ClientConfig,
     }
 
-    impl<'a> DangerousClientConfig<'a> {
+    impl DangerousClientConfig<'_> {
         /// Overrides the default `ServerCertVerifier` with something else.
         pub fn set_certificate_verifier(&mut self, verifier: Arc<dyn ServerCertVerifier>) {
             self.cfg.verifier = verifier;
@@ -606,7 +627,6 @@ impl EarlyData {
 
 #[cfg(feature = "std")]
 mod connection {
-    use alloc::sync::Arc;
     use alloc::vec::Vec;
     use core::fmt;
     use core::ops::{Deref, DerefMut};
@@ -615,12 +635,13 @@ mod connection {
     use pki_types::ServerName;
 
     use super::ClientConnectionData;
+    use crate::ClientConfig;
     use crate::client::EchStatus;
     use crate::common_state::Protocol;
     use crate::conn::{ConnectionCommon, ConnectionCore};
     use crate::error::Error;
     use crate::suites::ExtractedSecrets;
-    use crate::ClientConfig;
+    use crate::sync::Arc;
 
     /// Stub that implements io::Write and dispatches to `write_early_data`.
     pub struct WriteEarlyData<'a> {
@@ -644,7 +665,7 @@ mod connection {
         }
     }
 
-    impl<'a> io::Write for WriteEarlyData<'a> {
+    impl io::Write for WriteEarlyData<'_> {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             self.sess.write_early_data(buf)
         }
@@ -682,11 +703,25 @@ mod connection {
         /// we behave in the TLS protocol, `name` is the
         /// name of the server we want to talk to.
         pub fn new(config: Arc<ClientConfig>, name: ServerName<'static>) -> Result<Self, Error> {
-            Ok(Self {
-                inner: ConnectionCore::for_client(config, name, Vec::new(), Protocol::Tcp)?.into(),
-            })
+            Self::new_with_alpn(Arc::clone(&config), name, config.alpn_protocols.clone())
         }
 
+        /// Make a new ClientConnection with custom ALPN protocols.
+        pub fn new_with_alpn(
+            config: Arc<ClientConfig>,
+            name: ServerName<'static>,
+            alpn_protocols: Vec<Vec<u8>>,
+        ) -> Result<Self, Error> {
+            Ok(Self {
+                inner: ConnectionCommon::from(ConnectionCore::for_client(
+                    config,
+                    name,
+                    alpn_protocols,
+                    Vec::new(),
+                    Protocol::Tcp,
+                )?),
+            })
+        }
         /// Returns an `io::Write` implementer you can write bytes to
         /// to send TLS1.3 early data (a.k.a. "0-RTT data") to the server.
         ///
@@ -745,7 +780,7 @@ mod connection {
         /// it is concerned only with cryptography, whereas this _also_ covers TLS-level
         /// configuration that NIST recommends, as well as ECH HPKE suites if applicable.
         pub fn fips(&self) -> bool {
-            self.inner.core.data.fips
+            self.inner.core.common_state.fips
         }
 
         fn write_early_data(&mut self, data: &[u8]) -> io::Result<usize> {
@@ -801,6 +836,7 @@ impl ConnectionCore<ClientConnectionData> {
     pub(crate) fn for_client(
         config: Arc<ClientConfig>,
         name: ServerName<'static>,
+        alpn_protocols: Vec<Vec<u8>>,
         extra_exts: Vec<ClientExtension>,
         proto: Protocol,
     ) -> Result<Self, Error> {
@@ -808,8 +844,8 @@ impl ConnectionCore<ClientConnectionData> {
         common_state.set_max_fragment_size(config.max_fragment_size)?;
         common_state.protocol = proto;
         common_state.enable_secret_extraction = config.enable_secret_extraction;
+        common_state.fips = config.fips();
         let mut data = ClientConnectionData::new();
-        data.fips = config.fips();
 
         let mut cx = hs::ClientContext {
             common: &mut common_state,
@@ -818,7 +854,7 @@ impl ConnectionCore<ClientConnectionData> {
             sendable_plaintext: None,
         };
 
-        let state = hs::start_handshake(name, extra_exts, config, &mut cx)?;
+        let state = hs::start_handshake(name, alpn_protocols, extra_exts, config, &mut cx)?;
         Ok(Self::new(state, data, common_state))
     }
 
@@ -839,9 +875,49 @@ impl UnbufferedClientConnection {
     /// Make a new ClientConnection. `config` controls how we behave in the TLS protocol, `name` is
     /// the name of the server we want to talk to.
     pub fn new(config: Arc<ClientConfig>, name: ServerName<'static>) -> Result<Self, Error> {
+        Self::new_with_alpn(Arc::clone(&config), name, config.alpn_protocols.clone())
+    }
+
+    /// Make a new UnbufferedClientConnection with custom ALPN protocols.
+    pub fn new_with_alpn(
+        config: Arc<ClientConfig>,
+        name: ServerName<'static>,
+        alpn_protocols: Vec<Vec<u8>>,
+    ) -> Result<Self, Error> {
         Ok(Self {
-            inner: ConnectionCore::for_client(config, name, Vec::new(), Protocol::Tcp)?.into(),
+            inner: UnbufferedConnectionCommon::from(ConnectionCore::for_client(
+                config,
+                name,
+                alpn_protocols,
+                Vec::new(),
+                Protocol::Tcp,
+            )?),
         })
+    }
+
+    /// Extract secrets, so they can be used when configuring kTLS, for example.
+    /// Should be used with care as it exposes secret key material.
+    #[deprecated = "dangerous_extract_secrets() does not support session tickets or \
+                    key updates, use dangerous_into_kernel_connection() instead"]
+    pub fn dangerous_extract_secrets(self) -> Result<ExtractedSecrets, Error> {
+        self.inner.dangerous_extract_secrets()
+    }
+
+    /// Extract secrets and a [`KernelConnection`] object.
+    ///
+    /// This allows you use rustls to manage keys and then manage encryption and
+    /// decryption yourself (e.g. for kTLS).
+    ///
+    /// Should be used with care as it exposes secret key material.
+    ///
+    /// See the [`crate::kernel`] documentations for details on prerequisites
+    /// for calling this method.
+    pub fn dangerous_into_kernel_connection(
+        self,
+    ) -> Result<(ExtractedSecrets, KernelConnection<ClientConnectionData>), Error> {
+        self.inner
+            .core
+            .dangerous_into_kernel_connection()
     }
 }
 
@@ -894,15 +970,14 @@ impl MayEncryptEarlyData<'_> {
         early_data: &[u8],
         outgoing_tls: &mut [u8],
     ) -> Result<usize, EarlyDataError> {
-        let allowed = match self
+        let Some(allowed) = self
             .conn
             .core
             .data
             .early_data
             .check_write_opt(early_data.len())
-        {
-            Some(allowed) => allowed,
-            None => return Err(EarlyDataError::ExceededAllowedEarlyData),
+        else {
+            return Err(EarlyDataError::ExceededAllowedEarlyData);
         };
 
         self.conn
@@ -944,18 +1019,14 @@ impl std::error::Error for EarlyDataError {}
 #[derive(Debug)]
 pub struct ClientConnectionData {
     pub(super) early_data: EarlyData,
-    pub(super) resumption_ciphersuite: Option<SupportedCipherSuite>,
     pub(super) ech_status: EchStatus,
-    pub(super) fips: bool,
 }
 
 impl ClientConnectionData {
     fn new() -> Self {
         Self {
             early_data: EarlyData::new(),
-            resumption_ciphersuite: None,
             ech_status: EchStatus::NotOffered,
-            fips: false,
         }
     }
 }

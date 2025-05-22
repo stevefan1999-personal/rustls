@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 
 use pki_types::CertificateDer;
 
+use crate::conn::kernel::KernelState;
 use crate::crypto::SupportedKxGroup;
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
@@ -40,6 +41,8 @@ pub struct CommonState {
     pub(crate) may_receive_application_data: bool,
     pub(crate) early_traffic: bool,
     sent_fatal_alert: bool,
+    /// If we signaled end of stream.
+    pub(crate) has_sent_close_notify: bool,
     /// If the peer has signaled end of stream.
     pub(crate) has_received_close_notify: bool,
     #[cfg(feature = "std")]
@@ -56,6 +59,7 @@ pub struct CommonState {
     pub(crate) enable_secret_extraction: bool,
     temper_counters: TemperCounters,
     pub(crate) refresh_traffic_keys_pending: bool,
+    pub(crate) fips: bool,
 }
 
 impl CommonState {
@@ -73,6 +77,7 @@ impl CommonState {
             may_receive_application_data: false,
             early_traffic: false,
             sent_fatal_alert: false,
+            has_sent_close_notify: false,
             has_received_close_notify: false,
             #[cfg(feature = "std")]
             has_seen_eof: false,
@@ -86,6 +91,7 @@ impl CommonState {
             enable_secret_extraction: false,
             temper_counters: TemperCounters::default(),
             refresh_traffic_keys_pending: false,
+            fips: false,
         }
     }
 
@@ -107,21 +113,27 @@ impl CommonState {
         !(self.may_send_application_data && self.may_receive_application_data)
     }
 
-    /// Retrieves the certificate chain used by the peer to authenticate.
+    /// Retrieves the certificate chain or the raw public key used by the peer to authenticate.
     ///
     /// The order of the certificate chain is as it appears in the TLS
     /// protocol: the first certificate relates to the peer, the
     /// second certifies the first, the third certifies the second, and
     /// so on.
     ///
+    /// When using raw public keys, the first and only element is the raw public key.
+    ///
     /// This is made available for both full and resumed handshakes.
     ///
-    /// For clients, this is the certificate chain of the server.
+    /// For clients, this is the certificate chain or the raw public key of the server.
     ///
-    /// For servers, this is the certificate chain of the client,
+    /// For servers, this is the certificate chain or the raw public key of the client,
     /// if client authentication was completed.
     ///
     /// The return value is None until this value is available.
+    ///
+    /// Note: the return type of the 'certificate', when using raw public keys is `CertificateDer<'static>`
+    /// even though this should technically be a `SubjectPublicKeyInfoDer<'static>`.
+    /// This choice simplifies the API and ensures backwards compatibility.
     pub fn peer_certificates(&self) -> Option<&[CertificateDer<'static>]> {
         self.peer_certificates.as_deref()
     }
@@ -248,7 +260,9 @@ impl CommonState {
                         self.refresh_traffic_keys_pending = true;
                     }
                     _ => {
-                        error!("traffic keys exhausted, closing connection to prevent security failure");
+                        error!(
+                            "traffic keys exhausted, closing connection to prevent security failure"
+                        );
                         self.send_close_notify();
                         return Err(EncryptError::EncryptExhausted);
                     }
@@ -351,7 +365,9 @@ impl CommonState {
                         self.refresh_traffic_keys_pending = true;
                     }
                     _ => {
-                        error!("traffic keys exhausted, closing connection to prevent security failure");
+                        error!(
+                            "traffic keys exhausted, closing connection to prevent security failure"
+                        );
                         self.send_close_notify();
                         return;
                     }
@@ -487,7 +503,7 @@ impl CommonState {
     }
 
     fn send_warning_alert(&mut self, desc: AlertDescription) {
-        warn!("Sending warning alert {:?}", desc);
+        warn!("Sending warning alert {desc:?}");
         self.send_warning_alert_no_log(desc);
     }
 
@@ -515,10 +531,15 @@ impl CommonState {
                 .received_warning_alert()?;
             if self.is_tls13() && alert.description != AlertDescription::UserCanceled {
                 return Err(self.send_fatal_alert(AlertDescription::DecodeError, err));
-            } else {
-                warn!("TLS alert warning received: {:?}", alert);
-                return Ok(());
             }
+
+            // Some implementations send pointless `user_canceled` alerts, don't log them
+            // in release mode (https://bugs.openjdk.org/browse/JDK-8323517).
+            if alert.description != AlertDescription::UserCanceled || cfg!(debug_assertions) {
+                warn!("TLS alert warning received: {alert:?}");
+            }
+
+            return Ok(());
         }
 
         Err(err)
@@ -560,6 +581,7 @@ impl CommonState {
         }
         debug!("Sending warning alert {:?}", AlertDescription::CloseNotify);
         self.sent_fatal_alert = true;
+        self.has_sent_close_notify = true;
         self.send_warning_alert_no_log(AlertDescription::CloseNotify);
     }
 
@@ -845,6 +867,10 @@ pub(crate) trait State<Data>: Send + Sync {
     }
 
     fn handle_decrypt_error(&self) {}
+
+    fn into_external_state(self: Box<Self>) -> Result<Box<dyn KernelState + 'static>, Error> {
+        Err(Error::HandshakeNotComplete)
+    }
 
     fn into_owned(self: Box<Self>) -> Box<dyn State<Data> + 'static>;
 }

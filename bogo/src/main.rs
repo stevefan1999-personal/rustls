@@ -4,34 +4,54 @@
 // https://boringssl.googlesource.com/boringssl/+/master/ssl/test
 //
 
-use std::fmt::{Debug, Formatter};
+#![warn(
+    clippy::alloc_instead_of_core,
+    clippy::clone_on_ref_ptr,
+    clippy::manual_let_else,
+    clippy::std_instead_of_core,
+    clippy::use_self,
+    clippy::upper_case_acronyms,
+    elided_lifetimes_in_paths,
+    trivial_casts,
+    trivial_numeric_casts,
+    unreachable_pub,
+    unused_import_braces,
+    unused_extern_crates,
+    unused_qualifications
+)]
+
+use core::fmt::{Debug, Formatter};
 use std::io::{self, Read, Write};
 use std::sync::Arc;
 use std::{env, net, process, thread, time};
 
-use base64::prelude::{Engine, BASE64_STANDARD};
-use pki_types::pem::PemObject;
-use pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
+use base64::prelude::{BASE64_STANDARD, Engine};
+#[cfg(unix)]
+use nix::sys::signal::{self, Signal};
+#[cfg(unix)]
+use nix::unistd::Pid;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::{
     ClientConfig, ClientConnection, EchConfig, EchGreaseConfig, EchMode, EchStatus, Resumption,
-    WebPkiServerVerifier,
+    Tls12Resumption, WebPkiServerVerifier,
 };
 use rustls::crypto::aws_lc_rs::hpke;
 use rustls::crypto::hpke::{Hpke, HpkePublicKey};
-use rustls::crypto::{aws_lc_rs, ring, CryptoProvider, SupportedKxGroup};
+use rustls::crypto::{CryptoProvider, aws_lc_rs, ring};
 use rustls::internal::msgs::codec::{Codec, Reader};
 use rustls::internal::msgs::handshake::EchConfigPayload;
 use rustls::internal::msgs::persist::ServerSessionValue;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, EchConfigListBytes, PrivateKeyDer, ServerName, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::server::{
     ClientHello, ProducesTickets, ServerConfig, ServerConnection, WebPkiClientVerifier,
 };
 use rustls::{
-    client, compress, server, sign, version, AlertDescription, CertificateCompressionAlgorithm,
-    CertificateError, Connection, DigitallySignedStruct, DistinguishedName, Error, HandshakeKind,
-    InvalidMessage, NamedGroup, PeerIncompatible, PeerMisbehaved, ProtocolVersion, RootCertStore,
-    Side, SignatureAlgorithm, SignatureScheme, SupportedProtocolVersion,
+    AlertDescription, CertificateCompressionAlgorithm, CertificateError, Connection,
+    DigitallySignedStruct, DistinguishedName, Error, HandshakeKind, InvalidMessage, NamedGroup,
+    PeerIncompatible, PeerMisbehaved, ProtocolVersion, RootCertStore, Side, SignatureAlgorithm,
+    SignatureScheme, SupportedProtocolVersion, client, compress, server, sign, version,
 };
 
 static BOGO_NACK: i32 = 89;
@@ -96,10 +116,10 @@ struct Options {
     install_cert_compression_algs: CompressionAlgs,
     selected_provider: SelectedProvider,
     provider: CryptoProvider,
-    ech_config_list: Option<pki_types::EchConfigListBytes<'static>>,
+    ech_config_list: Option<EchConfigListBytes<'static>>,
     expect_ech_accept: bool,
-    expect_ech_retry_configs: Option<pki_types::EchConfigListBytes<'static>>,
-    on_resume_ech_config_list: Option<pki_types::EchConfigListBytes<'static>>,
+    expect_ech_retry_configs: Option<EchConfigListBytes<'static>>,
+    on_resume_ech_config_list: Option<EchConfigListBytes<'static>>,
     on_resume_expect_ech_accept: bool,
     on_initial_expect_ech_accept: bool,
     enable_ech_grease: bool,
@@ -107,12 +127,13 @@ struct Options {
     expect_curve_id: Option<NamedGroup>,
     on_initial_expect_curve_id: Option<NamedGroup>,
     on_resume_expect_curve_id: Option<NamedGroup>,
+    wait_for_debugger: bool,
 }
 
 impl Options {
     fn new() -> Self {
         let selected_provider = SelectedProvider::from_env();
-        Options {
+        Self {
             port: 0,
             shim_id: 0,
             side: Side::Client,
@@ -176,6 +197,7 @@ impl Options {
             expect_curve_id: None,
             on_initial_expect_curve_id: None,
             on_resume_expect_curve_id: None,
+            wait_for_debugger: false,
         }
     }
 
@@ -210,7 +232,9 @@ impl Options {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SelectedProvider {
     AwsLcRs,
+    #[cfg_attr(not(feature = "fips"), allow(dead_code))]
     AwsLcRsFips,
+    #[cfg_attr(not(feature = "post-quantum"), allow(dead_code))]
     PostQuantum,
     Ring,
 }
@@ -222,7 +246,9 @@ impl SelectedProvider {
             .as_deref()
         {
             None | Some("aws-lc-rs") => Self::AwsLcRs,
+            #[cfg(feature = "fips")]
             Some("aws-lc-rs-fips") => Self::AwsLcRsFips,
+            #[cfg(feature = "post-quantum")]
             Some("post-quantum") => Self::PostQuantum,
             Some("ring") => Self::Ring,
             Some(other) => panic!("unrecognised value for BOGO_SHIM_PROVIDER: {other:?}"),
@@ -237,7 +263,7 @@ impl SelectedProvider {
                 // this includes rustls-post-quantum, which just returns an altered
                 // version of `aws_lc_rs::default_provider()`
                 CryptoProvider {
-                    kx_groups: aws_lc_rs::ALL_KX_GROUPS.to_vec(),
+                    kx_groups: aws_lc_rs::DEFAULT_KX_GROUPS.to_vec(),
                     cipher_suites: aws_lc_rs::ALL_CIPHER_SUITES.to_vec(),
                     ..aws_lc_rs::default_provider()
                 }
@@ -304,7 +330,7 @@ fn decode_hex(hex: &str) -> Vec<u8> {
     (0..hex.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-        .inspect(|x| println!("item {:?}", x))
+        .inspect(|x| println!("item {x:?}"))
         .collect()
 }
 
@@ -390,7 +416,7 @@ struct DummyServerAuth {
 
 impl DummyServerAuth {
     fn new(trusted_cert_file: &str) -> Self {
-        DummyServerAuth {
+        Self {
             parent: WebPkiServerVerifier::builder_with_provider(
                 load_root_certs(trusted_cert_file),
                 SelectedProvider::from_env()
@@ -466,10 +492,10 @@ struct FixedSignatureSchemeServerCertResolver {
 }
 
 impl server::ResolvesServerCert for FixedSignatureSchemeServerCertResolver {
-    fn resolve(&self, client_hello: ClientHello) -> Option<Arc<sign::CertifiedKey>> {
+    fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<sign::CertifiedKey>> {
         let mut certkey = self.resolver.resolve(client_hello)?;
         Arc::make_mut(&mut certkey).key = Arc::new(FixedSignatureSchemeSigningKey {
-            key: certkey.key.clone(),
+            key: Arc::clone(&certkey.key),
             scheme: self.scheme,
         });
         Some(certkey)
@@ -495,7 +521,7 @@ impl client::ResolvesClientCert for FixedSignatureSchemeClientCertResolver {
             .resolver
             .resolve(root_hint_subjects, sigschemes)?;
         Arc::make_mut(&mut certkey).key = Arc::new(FixedSignatureSchemeSigningKey {
-            key: certkey.key.clone(),
+            key: Arc::clone(&certkey.key),
             scheme: self.scheme,
         });
         Some(certkey)
@@ -595,7 +621,7 @@ fn make_server_cfg(opts: &Options) -> Arc<ServerConfig> {
                 opts.root_hint_subjects.clone(),
             ))
         } else {
-            server::WebPkiClientVerifier::no_client_auth()
+            WebPkiClientVerifier::no_client_auth()
         };
 
     let cert = CertificateDer::pem_file_iter(&opts.cert_file)
@@ -628,7 +654,7 @@ fn make_server_cfg(opts: &Options) -> Arc<ServerConfig> {
     if opts.use_signing_scheme > 0 {
         let scheme = lookup_scheme(opts.use_signing_scheme);
         cfg.cert_resolver = Arc::new(FixedSignatureSchemeServerCertResolver {
-            resolver: cfg.cert_resolver.clone(),
+            resolver: Arc::clone(&cfg.cert_resolver),
             scheme,
         });
     }
@@ -680,8 +706,8 @@ struct ClientCacheWithoutKxHints {
 }
 
 impl ClientCacheWithoutKxHints {
-    fn new(delay: u32) -> Arc<ClientCacheWithoutKxHints> {
-        Arc::new(ClientCacheWithoutKxHints {
+    fn new(delay: u32) -> Arc<Self> {
+        Arc::new(Self {
             delay,
             storage: Arc::new(client::ClientSessionMemoryCache::new(32)),
         })
@@ -736,7 +762,7 @@ impl client::ClientSessionStore for ClientCacheWithoutKxHints {
 }
 
 impl Debug for ClientCacheWithoutKxHints {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         // Note: we omit self.storage here as it may contain sensitive data.
         f.debug_struct("ClientCacheWithoutKxHints")
             .field("delay", &self.delay)
@@ -799,12 +825,16 @@ fn make_client_cfg(opts: &Options) -> Arc<ClientConfig> {
     if !opts.cert_file.is_empty() && opts.use_signing_scheme > 0 {
         let scheme = lookup_scheme(opts.use_signing_scheme);
         cfg.client_auth_cert_resolver = Arc::new(FixedSignatureSchemeClientCertResolver {
-            resolver: cfg.client_auth_cert_resolver.clone(),
+            resolver: Arc::clone(&cfg.client_auth_cert_resolver),
             scheme,
         });
     }
 
-    cfg.resumption = Resumption::store(ClientCacheWithoutKxHints::new(opts.resumption_delay));
+    cfg.resumption = Resumption::store(ClientCacheWithoutKxHints::new(opts.resumption_delay))
+        .tls12_resumption(match opts.tickets {
+            true => Tls12Resumption::SessionIdOrTickets,
+            false => Tls12Resumption::SessionIdOnly,
+        });
     cfg.enable_sni = opts.use_sni;
     cfg.max_fragment_size = opts.max_fragment;
     cfg.require_ems = opts.require_ems;
@@ -849,7 +879,7 @@ fn quit_err(why: &str) -> ! {
 }
 
 fn handle_err(opts: &Options, err: Error) -> ! {
-    println!("TLS error: {:?}", err);
+    println!("TLS error: {err:?}");
     thread::sleep(time::Duration::from_millis(100));
 
     match err {
@@ -871,6 +901,10 @@ fn handle_err(opts: &Options, err: Error) -> ! {
         Error::InvalidMessage(
             InvalidMessage::TrailingData("ChangeCipherSpecPayload") | InvalidMessage::InvalidCcs,
         ) => quit(":BAD_CHANGE_CIPHER_SPEC:"),
+        Error::InvalidMessage(
+            InvalidMessage::EmptyTicketValue | InvalidMessage::IllegalEmptyList(_),
+        ) => quit(":DECODE_ERROR:"),
+        Error::InvalidMessage(InvalidMessage::IllegalEmptyValue) => quit(":ILLEGAL_EMPTY_VALUE:"),
         Error::InvalidMessage(
             InvalidMessage::InvalidKeyUpdate
             | InvalidMessage::MissingData(_)
@@ -939,6 +973,9 @@ fn handle_err(opts: &Options, err: Error) -> ! {
         Error::PeerMisbehaved(PeerMisbehaved::TooManyKeyUpdateRequests) => {
             quit(":TOO_MANY_KEY_UPDATES:")
         }
+        Error::PeerMisbehaved(PeerMisbehaved::ServerEchoedCompatibilitySessionId) => {
+            quit(":SERVER_ECHOED_INVALID_SESSION_ID:")
+        }
         Error::PeerMisbehaved(PeerMisbehaved::TooManyEmptyFragments) => {
             quit(":TOO_MANY_EMPTY_FRAGMENTS:")
         }
@@ -956,6 +993,7 @@ fn handle_err(opts: &Options, err: Error) -> ! {
             quit(":UNEXPECTED_EXTENSION:")
         }
         Error::PeerMisbehaved(PeerMisbehaved::SelectedUnofferedKxGroup) => quit(":WRONG_CURVE:"),
+        Error::PeerMisbehaved(PeerMisbehaved::InvalidKeyShare) => quit(":BAD_ECPOINT:"),
         Error::PeerMisbehaved(_) => quit(":PEER_MISBEHAVIOUR:"),
         Error::NoCertificatesPresented => quit(":NO_CERTS:"),
         Error::AlertReceived(AlertDescription::UnexpectedMessage) => quit(":BAD_ALERT:"),
@@ -966,7 +1004,7 @@ fn handle_err(opts: &Options, err: Error) -> ! {
             quit(":CANNOT_PARSE_LEAF_CERT:")
         }
         Error::InvalidCertificate(CertificateError::BadSignature) => quit(":BAD_SIGNATURE:"),
-        Error::InvalidCertificate(e) => quit(&format!(":BAD_CERT: ({:?})", e)),
+        Error::InvalidCertificate(e) => quit(&format!(":BAD_CERT: ({e:?})")),
         Error::PeerSentOversizedRecord => quit(":DATA_LENGTH_TOO_LONG:"),
         _ => {
             println_err!("unhandled error: {:?}", err);
@@ -978,7 +1016,7 @@ fn handle_err(opts: &Options, err: Error) -> ! {
 fn flush(sess: &mut Connection, conn: &mut net::TcpStream) {
     while sess.wants_write() {
         if let Err(err) = sess.write_tls(conn) {
-            println!("IO error: {:?}", err);
+            println!("IO error: {err:?}");
             process::exit(0);
         }
     }
@@ -1009,12 +1047,12 @@ fn read_n_bytes(opts: &Options, sess: &mut Connection, conn: &mut net::TcpStream
     let mut bytes = [0u8; MAX_MESSAGE_SIZE];
     match conn.read(&mut bytes[..n]) {
         Ok(count) => {
-            println!("read {:?} bytes", count);
+            println!("read {count:?} bytes");
             sess.read_tls(&mut io::Cursor::new(&mut bytes[..count]))
                 .expect("read_tls not expected to fail reading from buffer");
         }
-        Err(ref err) if err.kind() == io::ErrorKind::ConnectionReset => {}
-        Err(err) => panic!("invalid read: {}", err),
+        Err(err) if err.kind() == io::ErrorKind::ConnectionReset => {}
+        Err(err) => panic!("invalid read: {err}"),
     };
 
     after_read(opts, sess, conn);
@@ -1023,8 +1061,8 @@ fn read_n_bytes(opts: &Options, sess: &mut Connection, conn: &mut net::TcpStream
 fn read_all_bytes(opts: &Options, sess: &mut Connection, conn: &mut net::TcpStream) {
     match sess.read_tls(conn) {
         Ok(_) => {}
-        Err(ref err) if err.kind() == io::ErrorKind::ConnectionReset => {}
-        Err(err) => panic!("invalid read: {}", err),
+        Err(err) if err.kind() == io::ErrorKind::ConnectionReset => {}
+        Err(err) => panic!("invalid read: {err}"),
     };
 
     after_read(opts, sess, conn);
@@ -1084,7 +1122,7 @@ fn exec(opts: &Options, mut sess: Connection, count: usize) {
         }
 
         if opts.side == Side::Server && opts.enable_early_data {
-            if let Some(ref mut ed) = server(&mut sess).early_data() {
+            if let Some(ed) = &mut server(&mut sess).early_data() {
                 let mut data = Vec::new();
                 let data_len = ed
                     .read_to_end(&mut data)
@@ -1245,7 +1283,7 @@ fn exec(opts: &Options, mut sess: Connection, count: usize) {
                 println!("EOF (tcp)");
                 return;
             }
-            Err(err) => panic!("unhandled read error {:?}", err),
+            Err(err) => panic!("unhandled read error {err:?}"),
         };
 
         if opts.shut_down_after_handshake && !sent_shutdown && !sess.is_handshaking() {
@@ -1254,7 +1292,7 @@ fn exec(opts: &Options, mut sess: Connection, count: usize) {
         }
 
         if quench_writes && len > 0 {
-            println!("unquenching writes after {:?}", len);
+            println!("unquenching writes after {len:?}");
             quench_writes = false;
         }
 
@@ -1278,7 +1316,7 @@ pub fn main() {
         println!("No");
         process::exit(0);
     }
-    println!("options: {:?}", args);
+    println!("options: {args:?}");
 
     let mut opts = Options::new();
 
@@ -1331,7 +1369,7 @@ pub fn main() {
             "-tls13-variant" => {
                 let variant = args.remove(0).parse::<u16>().unwrap();
                 if variant != 1 {
-                    println!("NYI TLS1.3 variant selection: {:?} {:?}", arg, variant);
+                    println!("NYI TLS1.3 variant selection: {arg:?} {variant:?}");
                     process::exit(BOGO_NACK);
                 }
             }
@@ -1402,7 +1440,7 @@ pub fn main() {
             "-expect-tls13-downgrade" |
             "-enable-signed-cert-timestamps" |
             "-expect-session-id" => {
-                println!("not checking {}; NYI", arg);
+                println!("not checking {arg}; NYI");
             }
 
             "-key-update" => {
@@ -1517,7 +1555,7 @@ pub fn main() {
                         opts.expect_reject_early_data = true;
                     }
                     _ => {
-                        println!("NYI early data reason: {}", reason);
+                        println!("NYI early data reason: {reason}");
                         process::exit(1);
                     }
                 }
@@ -1533,9 +1571,10 @@ pub fn main() {
                 let group = NamedGroup::from(args.remove(0).parse::<u16>().unwrap());
                 opts.groups.get_or_insert(Vec::new()).push(group);
 
-                // if X25519Kyber768Draft00 is requested, insert it from rustls_post_quantum
-                if group == rustls_post_quantum::X25519Kyber768Draft00.name() && opts.selected_provider == SelectedProvider::PostQuantum {
-                    opts.provider.kx_groups.insert(0, &rustls_post_quantum::X25519Kyber768Draft00);
+                // if X25519MLKEM768 is requested, insert it from rustls_post_quantum
+                #[cfg(feature = "post-quantum")]
+                if group == rustls_post_quantum::X25519MLKEM768.name() && opts.selected_provider == SelectedProvider::PostQuantum {
+                    opts.provider.kx_groups.insert(0, rustls_post_quantum::X25519MLKEM768);
                 }
             }
             "-resumption-delay" => {
@@ -1551,6 +1590,7 @@ pub fn main() {
             "-install-one-cert-compression-alg" => {
                 opts.install_cert_compression_algs = CompressionAlgs::One(args.remove(0).parse::<u16>().unwrap());
             }
+            #[cfg(feature = "fips")]
             "-fips-202205" if opts.selected_provider == SelectedProvider::AwsLcRsFips => {
                 opts.provider = rustls::crypto::default_fips_provider();
             }
@@ -1593,6 +1633,16 @@ pub fn main() {
             "-server-preference" => {
                 opts.server_preference = true;
             }
+            "-wait-for-debugger" => {
+                #[cfg(windows)]
+                {
+                    panic("-wait-for-debugger not supported on Windows");
+                }
+                #[cfg(unix)]
+                {
+                    opts.wait_for_debugger = true;
+                }
+            }
 
             // defaults:
             "-enable-all-curves" |
@@ -1603,6 +1653,7 @@ pub fn main() {
             "-handoff" |
             "-ipv6" |
             "-decline-alpn" |
+            "-permute-extensions" |
             "-expect-no-session" |
             "-expect-ticket-renewal" |
             "-enable-ocsp-stapling" |
@@ -1660,12 +1711,16 @@ pub fn main() {
             "-ignore-tls13-downgrade" |
             "-allow-hint-mismatch" |
             "-wpa-202304" |
+            "-cnsa-202407" |
             "-srtp-profiles" |
-            "-permute-extensions" |
+            "-use-ticket-aead-callback" |
             "-signed-cert-timestamps" |
             "-on-initial-expect-peer-cert-file" |
+            "-resumption-across-names-enabled" |
+            "-expect-resumable-across-names" |
+            "-expect-not-resumable-across-names" |
             "-use-custom-verify-callback" => {
-                println!("NYI option {:?}", arg);
+                println!("NYI option {arg:?}");
                 process::exit(BOGO_NACK);
             }
 
@@ -1677,13 +1732,21 @@ pub fn main() {
             }
 
             _ => {
-                println!("unhandled option {:?}", arg);
+                println!("unhandled option {arg:?}");
                 process::exit(1);
             }
         }
     }
 
-    println!("opts {:?}", opts);
+    println!("opts {opts:?}");
+
+    #[cfg(unix)]
+    if opts.wait_for_debugger {
+        // On Unix systems when -wait-for-debugger is passed from the BoGo runner
+        // we should SIGSTOP ourselves to allow a debugger to attach to the shim to
+        // continue the testing process.
+        signal::kill(Pid::from_raw(process::id() as i32), Signal::SIGSTOP).unwrap();
+    }
 
     let (mut client_cfg, mut server_cfg) = match opts.side {
         Side::Client => (Some(make_client_cfg(&opts)), None),
@@ -1696,9 +1759,10 @@ pub fn main() {
         ccfg: &Option<Arc<ClientConfig>>,
     ) -> Connection {
         assert!(opts.quic_transport_params.is_empty());
-        assert!(opts
-            .expect_quic_transport_params
-            .is_empty());
+        assert!(
+            opts.expect_quic_transport_params
+                .is_empty()
+        );
 
         if opts.side == Side::Server {
             let scfg = Arc::clone(scfg.as_ref().unwrap());
@@ -1722,7 +1786,11 @@ pub fn main() {
         exec(&opts, sess, i);
         if opts.resume_with_tickets_disabled {
             opts.tickets = false;
-            server_cfg = Some(make_server_cfg(&opts));
+
+            match opts.side {
+                Side::Server => server_cfg = Some(make_server_cfg(&opts)),
+                Side::Client => client_cfg = Some(make_client_cfg(&opts)),
+            };
         }
         if opts.on_resume_ech_config_list.is_some() {
             opts.ech_config_list

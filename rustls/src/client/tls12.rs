@@ -1,6 +1,5 @@
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
-use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -10,27 +9,30 @@ use subtle::ConstantTimeEq;
 
 use super::client_conn::ClientConnectionData;
 use super::hs::ClientContext;
+use crate::ConnectionTrafficSecrets;
 use crate::check::{inappropriate_handshake_message, inappropriate_message};
 use crate::client::common::{ClientAuthDetails, ServerCertDetails};
-use crate::client::{hs, ClientConfig};
+use crate::client::{ClientConfig, hs};
 use crate::common_state::{CommonState, HandshakeKind, KxState, Side, State};
 use crate::conn::ConnectionRandoms;
+use crate::conn::kernel::{Direction, KernelContext, KernelState};
 use crate::crypto::KeyExchangeAlgorithm;
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerIncompatible, PeerMisbehaved};
 use crate::hash_hs::HandshakeHash;
 use crate::log::{debug, trace, warn};
-use crate::msgs::base::{Payload, PayloadU16, PayloadU8};
+use crate::msgs::base::{Payload, PayloadU8, PayloadU16};
 use crate::msgs::ccs::ChangeCipherSpecPayload;
 use crate::msgs::handshake::{
     CertificateChain, ClientDhParams, ClientEcdhParams, ClientKeyExchangeParams,
-    HandshakeMessagePayload, HandshakePayload, NewSessionTicketPayload, ServerKeyExchangeParams,
-    SessionId,
+    HandshakeMessagePayload, HandshakePayload, NewSessionTicketPayload,
+    NewSessionTicketPayloadTls13, ServerKeyExchangeParams, SessionId,
 };
 use crate::msgs::message::{Message, MessagePayload};
 use crate::msgs::persist;
 use crate::sign::Signer;
 use crate::suites::{PartiallyExtractedSecrets, SupportedCipherSuite};
+use crate::sync::Arc;
 use crate::tls12::{self, ConnectionSecrets, Tls12CipherSuite};
 use crate::verify::{self, DigitallySignedStruct};
 
@@ -731,7 +733,7 @@ impl State<ClientConnectionData> for ExpectCertificateRequest<'_> {
             HandshakePayload::CertificateRequest
         )?;
         self.transcript.add_message(&m);
-        debug!("Got CertificateRequest {:?}", certreq);
+        debug!("Got CertificateRequest {certreq:?}");
 
         // The RFC jovially describes the design here as 'somewhat complicated'
         // and 'somewhat underspecified'.  So thanks for that.
@@ -837,16 +839,16 @@ impl State<ClientConnectionData> for ExpectServerDone<'_> {
         let suite = st.suite;
 
         // 1. Verify the cert chain.
-        // 2. Verify any SCTs provided with the certificate.
-        // 3. Verify that the top certificate signed their kx.
-        // 4. If doing client auth, send our Certificate.
-        // 5. Complete the key exchange:
+        // 2. Verify that the top certificate signed their kx.
+        // 3. If doing client auth, send our Certificate.
+        // 4. Complete the key exchange:
         //    a) generate our kx pair
         //    b) emit a ClientKeyExchange containing it
         //    c) if doing client auth, emit a CertificateVerify
-        //    d) emit a CCS
-        //    e) derive the shared keys, and start encryption
-        // 6. emit a Finished, our first encrypted message under the new keys.
+        //    d) derive the shared keys
+        //    e) emit a CCS
+        //    f) use the derived keys to start encryption
+        // 5. emit a Finished, our first encrypted message under the new keys.
 
         // 1.
         let (end_entity, intermediates) = st
@@ -872,7 +874,7 @@ impl State<ClientConnectionData> for ExpectServerDone<'_> {
                     .send_cert_verify_error_alert(err)
             })?;
 
-        // 3.
+        // 2.
         // Build up the contents of the signed message.
         // It's ClientHello.random || ServerHello.random || ServerKeyExchange.params
         let sig_verified = {
@@ -904,7 +906,7 @@ impl State<ClientConnectionData> for ExpectServerDone<'_> {
         };
         cx.common.peer_certificates = Some(st.server_cert.cert_chain.into_owned());
 
-        // 4.
+        // 3.
         if let Some(client_auth) = &st.client_auth {
             let certs = match client_auth {
                 ClientAuthDetails::Empty { .. } => CertificateChain::default(),
@@ -913,7 +915,7 @@ impl State<ClientConnectionData> for ExpectServerDone<'_> {
             emit_certificate(&mut st.transcript, certs, cx.common);
         }
 
-        // 5a.
+        // 4a.
         let kx_params = tls12::decode_kx_params::<ServerKeyExchangeParams>(
             st.suite.kx,
             cx.common,
@@ -934,16 +936,16 @@ impl State<ClientConnectionData> for ExpectServerDone<'_> {
                     .copied()
             }
         };
-        let skxg = match maybe_skxg {
-            Some(skxg) => skxg,
-            None => {
-                return Err(PeerMisbehaved::SelectedUnofferedKxGroup.into());
-            }
+        let Some(skxg) = maybe_skxg else {
+            return Err(cx.common.send_fatal_alert(
+                AlertDescription::IllegalParameter,
+                PeerMisbehaved::SelectedUnofferedKxGroup,
+            ));
         };
         cx.common.kx_state = KxState::Start(skxg);
         let kx = skxg.start()?;
 
-        // 5b.
+        // 4b.
         let mut transcript = st.transcript;
         emit_client_kx(&mut transcript, st.suite.kx, cx.common, kx.pub_key());
         // Note: EMS handshake hash only runs up to ClientKeyExchange.
@@ -951,24 +953,31 @@ impl State<ClientConnectionData> for ExpectServerDone<'_> {
             .using_ems
             .then(|| transcript.current_hash());
 
-        // 5c.
+        // 4c.
         if let Some(ClientAuthDetails::Verify { signer, .. }) = &st.client_auth {
             emit_certverify(&mut transcript, signer.as_ref(), cx.common)?;
         }
 
-        // 5d.
-        emit_ccs(cx.common);
-
-        // 5e. Now commit secrets.
+        // 4d. Derive secrets.
+        // An alert at this point will be sent in plaintext.  That must happen
+        // prior to the CCS, or else the peer will try to decrypt it.
         let secrets = ConnectionSecrets::from_key_exchange(
             kx,
             kx_params.pub_key(),
             ems_seed,
             st.randoms,
             suite,
-        )?;
+        )
+        .map_err(|err| {
+            cx.common
+                .send_fatal_alert(AlertDescription::IllegalParameter, err)
+        })?;
         cx.common.kx_state.complete();
 
+        // 4e. CCS. We are definitely going to switch on encryption.
+        emit_ccs(cx.common);
+
+        // 4f. Now commit secrets.
         st.config.key_log.log(
             "CLIENT_RANDOM",
             &secrets.randoms.client,
@@ -980,7 +989,7 @@ impl State<ClientConnectionData> for ExpectServerDone<'_> {
             .record_layer
             .start_encrypting();
 
-        // 6.
+        // 5.
         emit_finished(&secrets, &mut transcript, cx.common);
 
         if st.must_issue_new_ticket {
@@ -1178,12 +1187,9 @@ impl ExpectFinished {
             return;
         }
 
-        let now = match self.config.current_time() {
-            Ok(now) => now,
-            Err(_) => {
-                debug!("Could not get current time");
-                return;
-            }
+        let Ok(now) = self.config.current_time() else {
+            debug!("Could not get current time");
+            return;
         };
 
         let session_value = persist::Tls12ClientSessionValue::new(
@@ -1195,6 +1201,8 @@ impl ExpectFinished {
                 .peer_certificates
                 .clone()
                 .unwrap_or_default(),
+            &self.config.verifier,
+            &self.config.client_auth_cert_resolver,
             now,
             lifetime,
             self.using_ems,
@@ -1325,7 +1333,29 @@ impl State<ClientConnectionData> for ExpectTraffic {
             .extract_secrets(Side::Client)
     }
 
+    fn into_external_state(self: Box<Self>) -> Result<Box<dyn KernelState + 'static>, Error> {
+        Ok(self)
+    }
+
     fn into_owned(self: Box<Self>) -> hs::NextState<'static> {
         self
+    }
+}
+
+impl KernelState for ExpectTraffic {
+    fn update_secrets(&mut self, _: Direction) -> Result<ConnectionTrafficSecrets, Error> {
+        Err(Error::General(
+            "TLS 1.2 connections do not support traffic secret updates".into(),
+        ))
+    }
+
+    fn handle_new_session_ticket(
+        &mut self,
+        _cx: &mut KernelContext<'_>,
+        _message: &NewSessionTicketPayloadTls13,
+    ) -> Result<(), Error> {
+        Err(Error::General(
+            "TLS 1.2 session tickets may not be sent once the handshake has completed".into(),
+        ))
     }
 }
